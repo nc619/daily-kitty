@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Kitty Widgets</string>
+    <string name="kitty_widget">Daily Kitty</string>
+    <string name="doodle_widget">Sweetie\'s drawing</string>
+    <string name="kitty_widget_desc">Today\'s kitty on your home screen</string>
+    <string name="doodle_widget_desc">The latest drawing from your sweetie</string>
+</resources>

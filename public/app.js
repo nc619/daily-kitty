@@ -390,6 +390,8 @@ function renderHome() {
   }
   chips.hidden = !chips.children.length;
 
+  renderWidgetCard();
+
   const next = full ? upcoming(state.events || [], 3) : [];
   $('upnext').hidden = !next.length;
   $('upnext-list').innerHTML = '';
@@ -446,6 +448,36 @@ $('nudge').onclick = async () => {
   }
 };
 $('draw-back').onclick = () => (location.hash = '#draw');
+
+// ---------- Home-screen widgets (Android companion app) ----------
+
+const WIDGET_APK = 'https://github.com/nc619/daily-kitty/releases/download/widgets/kitty-widgets.apk';
+const isAndroid = /Android/i.test(navigator.userAgent);
+
+function widgetSteps(withHide) {
+  const param = me() === 'him' ? `t=${encodeURIComponent(token)}` : `k=${encodeURIComponent(herKey)}`;
+  const connect = `intent://setup?${param}#Intent;scheme=dailykitty;package=com.dailykitty.widget;S.browser_fallback_url=${encodeURIComponent(WIDGET_APK)};end`;
+  return [
+    el('p', { class: 'eyebrow' }, '📱 Home-screen widgets'),
+    el('p', { class: 'hint' }, "Today's kitty and your sweetie's latest drawing, right on your home screen."),
+    el('ol', {},
+      el('li', {}, 'Get the little widget app', el('br'), el('a', { class: 'btn small outline', href: WIDGET_APK }, '⬇️ Download Kitty Widgets')),
+      el('li', {}, 'Open the download and install it (allow Chrome to install apps if asked)'),
+      el('li', {}, 'Link it to you', el('br'), el('a', { class: 'btn small', href: connect }, '🔗 Connect the widgets')),
+      el('li', {}, 'Long-press your home screen → Widgets → Kitty Widgets')),
+    withHide ? el('button', { class: 'btn small ghost', onclick: () => { save('kitty_widget_hidden', '1'); $('widget-card').hidden = true; } }, 'Hide this') : null,
+  ];
+}
+
+function renderWidgetCard() {
+  const card = $('widget-card');
+  const show = isAndroid && unlocked() && !load('kitty_widget_hidden');
+  card.hidden = !show;
+  if (show && !card.children.length) card.append(...widgetSteps(true));
+  const settings = $('widget-settings');
+  settings.innerHTML = '';
+  if (me() === 'him') settings.append(...widgetSteps(false));
+}
 
 // ---------- Router ----------
 

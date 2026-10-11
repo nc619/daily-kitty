@@ -1,0 +1,35 @@
+# Builds the "Kitty Widgets" Android app in the cloud and publishes it as a download:
+# https://github.com/nc619/daily-kitty/releases/download/widgets/kitty-widgets.apk
+name: Widget APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/widget-apk.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+      - name: Build APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Publish APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk kitty-widgets.apk
+          gh release view widgets >/dev/null 2>&1 || gh release create widgets --title "Kitty Widgets (Android)" --notes "Home-screen widgets for Daily Kitty: today's kitty and your sweetie's latest drawing."
+          gh release upload widgets kitty-widgets.apk --clobber

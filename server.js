@@ -703,6 +703,21 @@ route('DELETE', '/api/gifts/([a-f0-9]+)', async (req, [id]) => {
   return deleteGift(id);
 });
 
+// For the Android home-screen widgets: today's kitty and the latest drawing from the other one.
+route('GET', '/api/widget', async (req) => {
+  const me = requireAny(req);
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const base = `${req.headers['x-forwarded-proto'] || 'http'}://${host}`;
+  const abs = (u) => (u && u.startsWith('/') ? base + u : u);
+  const cur = store.db.current;
+  const doodle = store.db.posts.find((p) => p.kind === 'doodle' && p.from === push.other(me));
+  const showDoodle = me === 'him' || store.db.unlocked;
+  return {
+    kitty: cur ? { url: abs(cur.imageUrl), caption: cur.caption || '', at: cur.sentAt } : null,
+    doodle: showDoodle && doodle ? { url: abs(doodle.url), caption: doodle.caption || '', at: doodle.at } : null,
+  };
+});
+
 route('GET', '/api/events', async (req) => {
   requireUnlocked(req);
   return { events: store.db.events };

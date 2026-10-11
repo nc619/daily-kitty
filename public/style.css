@@ -787,3 +787,8 @@ textarea { resize: vertical; }
   .mem-grid, .pool { grid-template-columns: repeat(4, 1fr); }
   .ideas { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* Widgets card */
+.widget-card ol { margin: 6px 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.widget-card li { font-weight: 600; }
+.widget-card li .btn { margin-top: 6px; }
