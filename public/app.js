@@ -1,5 +1,6 @@
 // Daily Kitty: front end.
 const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const NOTE_PRESETS = [
   'Your sweetie misses you 🥺',
@@ -14,11 +15,53 @@ const NOTE_PRESETS = [
   'Boop 👉🐽',
 ];
 
-let token = load('kitty_token');
-let state = load('kitty_state', true); // last known state, so the app shows something instantly
-let picked = null; // { image: dataUrl } or { imageUrl }
+const EVENT_EMOJI = { trip: '✈️', date: '🌙', special: '💖', other: '📌' };
 
-// ---------- Small helpers ----------
+const DATE_IDEAS = [
+  { group: 'Watch together 🍿', items: [
+    ['🎬', 'Movie night', 'Press play at the same time (or use Teleparty) with matching snacks.'],
+    ['📺', 'Series marathon', 'Start a new show together and only watch it together.'],
+    ['🌍', 'Travel docs night', 'Watch a documentary about a place you want to visit together.'],
+    ['😂', 'Childhood cartoons', "Show each other the cartoons you grew up with."],
+  ] },
+  { group: 'Play together 🎮', items: [
+    ['🗺️', 'GeoGuessr duel', 'Guess where in the world you are; loser plans the next date.'],
+    ['✏️', 'Gartic Phone / skribbl.io', 'Silly drawing games that end in tears of laughter.'],
+    ['🕵️', 'Codenames online', 'Free at codenames.game; play as a team against the clock.'],
+    ['🧩', 'Online jigsaw', 'Solve a jigsaw together on a shared puzzle site.'],
+    ['❓', 'Quiz about us', 'Write 10 questions about yourselves and quiz each other.'],
+  ] },
+  { group: 'Cook & eat 🍝', items: [
+    ['👩‍🍳', 'Same recipe, two kitchens', 'Cook the same dish on video call, then eat "together".'],
+    ['🛵', 'Surprise delivery', "Order each other's dinner without saying what it is."],
+    ['🍷', 'Tasting night', 'Pick the same wine, chocolate or cheese and rate it.'],
+    ['🥞', 'Breakfast date', 'Pancakes and coffee on call before the day starts.'],
+  ] },
+  { group: 'Cozy & deep 💞', items: [
+    ['💬', '36 questions', 'The famous "36 questions to fall in love". Take your time.'],
+    ['📖', 'Book club for two', 'Read the same chapter, then talk about it.'],
+    ['✉️', 'Letter night', 'Write each other real letters and post them the same evening.'],
+    ['🔮', 'Future planning', 'Dream up your next trip, your future home, your bucket list.'],
+    ['😴', 'Fall asleep on call', 'The classic. Stay on until one of you is snoring.'],
+  ] },
+  { group: 'Creative ✨', items: [
+    ['🎨', 'Paint the same thing', "Same subject, 30 minutes, then reveal. No judging (a bit of judging)."],
+    ['🎶', 'Playlist swap', 'Build a shared playlist of songs that remind you of each other.'],
+    ['📸', 'Photo challenge', 'Same list of things to photograph in your cities, compare at the end.'],
+    ['🧶', 'Make something', 'Both try a little craft kit or origami tutorial at the same time.'],
+  ] },
+  { group: 'Little adventures 🌙', items: [
+    ['🌌', 'Stargazing call', 'Go outside, look at the same moon, talk about everything.'],
+    ['🏛️', 'Virtual museum', 'Google Arts & Culture tours of museums around the world.'],
+    ['🚶', 'Walking date', 'Go for a walk at the same time and show each other your view.'],
+    ['🏠', 'House tours', 'Browse dream houses or holiday rentals together.'],
+  ] },
+];
+
+const COLORS = ['#4b3a47', '#ec5f93', '#f7a541', '#f5d142', '#58c49a', '#5aa9e6', '#9b7be8', '#ffffff'];
+const SIZES = [3, 7, 14];
+
+// ---------- Local storage ----------
 
 function load(key, json) {
   try {
@@ -35,9 +78,30 @@ function save(key, value) {
   } catch { /* private mode */ }
 }
 
-async function api(path, body) {
-  const opts = { method: body ? 'POST' : 'GET', headers: {} };
-  if (token) opts.headers['x-sweetie-token'] = token;
+// Her private link: /?k=…  → remembered, then removed from the address bar.
+(() => {
+  const params = new URLSearchParams(location.search);
+  const k = params.get('k');
+  if (k) {
+    save('kitty_key', k);
+    history.replaceState(null, '', '/' + location.hash);
+  }
+})();
+
+let token = load('kitty_token');
+let herKey = load('kitty_key');
+let state = load('kitty_state', true);
+const myTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function authHeaders() {
+  const h = { 'x-tz': myTz };
+  if (token) h['x-sweetie-token'] = token;
+  if (herKey) h['x-kitty-key'] = herKey;
+  return h;
+}
+
+async function api(path, body, method) {
+  const opts = { method: method || (body ? 'POST' : 'GET'), headers: authHeaders() };
   if (body) {
     opts.headers['content-type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -46,6 +110,60 @@ async function api(path, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status });
   return data;
+}
+
+/** Uploads a file in 1 MB chunks (3 at a time) and returns { id, url, mime }. */
+async function upload(blob, name, onProgress) {
+  const mime = blob.type || '';
+  if (!mime) throw new Error("Unknown file type");
+  const start = await api('/api/upload', { mime, size: blob.size, name: name || '' });
+  const C = start.chunkSize;
+  const n = Math.max(1, Math.ceil(blob.size / C));
+  let next = 0;
+  let done = 0;
+  onProgress && onProgress(0);
+  const worker = async () => {
+    while (next < n) {
+      const i = next++;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const r = await fetch(`/api/upload/${start.id}/${i}`, { method: 'PUT', headers: authHeaders(), body: blob.slice(i * C, (i + 1) * C) });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          break;
+        } catch (e) {
+          if (attempt >= 4) throw e;
+          await sleep(1500 * (attempt + 1));
+        }
+      }
+      done++;
+      onProgress && onProgress(done / n);
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  return api(`/api/upload/${start.id}/done`, {});
+}
+
+/** Shrinks a photo so it uploads quickly (and fixes its rotation). */
+async function resizeImage(file, max = 2000, quality = 0.88) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function setProgress(bar, fraction) {
+  bar.hidden = fraction == null;
+  if (fraction != null) bar.firstElementChild.style.width = `${Math.round(fraction * 100)}%`;
 }
 
 let toastTimer;
@@ -57,69 +175,116 @@ function toast(text) {
   toastTimer = setTimeout(() => (el.hidden = true), 3200);
 }
 
+async function withButton(btn, label, fn) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = label;
+  try {
+    await fn();
+  } catch (e) {
+    toast(`Oops 😿 ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e[k] = v;
+    else if (v != null && v !== false) e.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c != null) e.append(c);
+  return e;
+}
+
+// ---------- Dates ----------
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const todayStr = () => ymd(new Date());
+const parseYmd = (s) => new Date(s + 'T12:00:00');
+const daysBetween = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
+const prettyDate = (s, opts = { weekday: 'short', day: 'numeric', month: 'short' }) => parseYmd(s).toLocaleDateString([], opts);
+
 function formatTime(ms) {
   const d = new Date(ms);
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 864e5);
-  if (d.toDateString() === today.toDateString()) return time;
-  if (d.toDateString() === yesterday.toDateString()) return `yesterday at ${time}`;
+  if (d.toDateString() === new Date().toDateString()) return time;
+  if (d.toDateString() === new Date(Date.now() - 864e5).toDateString()) return `yesterday at ${time}`;
   return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} at ${time}`;
 }
 
-// ---------- Home ----------
-
-function render() {
-  $('today').textContent = new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
-
-  const kitty = state && state.current;
-  const frame = $('kitty-frame');
-  const img = $('kitty-img');
-  if (kitty) {
-    frame.classList.remove('empty');
-    if (img.dataset.src !== kitty.imageUrl) {
-      img.dataset.src = kitty.imageUrl;
-      frame.classList.add('loading');
-      img.onload = () => frame.classList.remove('loading');
-      img.onerror = () => frame.classList.remove('loading');
-      img.src = kitty.imageUrl;
-    }
-    $('kitty-label').textContent = kitty.sentBy === 'sweetie' ? '💌 A special kitty from your sweetie' : "☀️ Today's kitty";
-    $('kitty-caption').textContent = kitty.caption || '';
-    $('kitty-caption').hidden = !kitty.caption;
-    $('kitty-time').textContent = `Arrived ${formatTime(kitty.sentAt)}`;
-  } else if (state) {
-    frame.classList.remove('loading');
-    frame.classList.add('empty');
-    $('kitty-label').textContent = '';
-    $('kitty-time').textContent = '';
-  }
-
-  const note = state && state.note;
-  const showNote = note && Date.now() - note.sentAt < 864e5;
-  $('note').hidden = !showNote;
-  if (showNote) {
-    $('note-text').textContent = note.message;
-    $('note-time').textContent = formatTime(note.sentAt);
-  }
-
-  $('fab').hidden = !(token && state && state.isSender);
+function occursOn(ev, date) {
+  if (ev.yearly) return ev.start.slice(5) === date.slice(5) && date >= ev.start;
+  return date >= ev.start && date <= (ev.end || ev.start);
 }
+
+/** Next date an event happens (today counts), or null if it's over. */
+function nextOccurrence(ev, today = todayStr()) {
+  if (ev.yearly) {
+    const y = Number(today.slice(0, 4));
+    let d = `${y}${ev.start.slice(4)}`;
+    if (d < today) d = `${y + 1}${ev.start.slice(4)}`;
+    return d < ev.start ? ev.start : d;
+  }
+  if ((ev.end || ev.start) < today) return null;
+  return ev.start < today ? today : ev.start;
+}
+
+function upcoming(events, limit = 50, filter = () => true) {
+  return events
+    .filter(filter)
+    .map((ev) => ({ ev, date: nextOccurrence(ev) }))
+    .filter((x) => x.date)
+    .sort((a, b) => (a.date + (a.ev.time || '')).localeCompare(b.date + (b.ev.time || '')))
+    .slice(0, limit);
+}
+
+function inDays(date) {
+  const n = daysBetween(todayStr(), date);
+  if (n <= 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  return `in ${n} days`;
+}
+
+// ---------- State ----------
+
+const me = () => (state && state.me) || null;
+const unlocked = () => !!(state && state.unlocked);
 
 let refreshing = null;
 function refresh() {
+  if (!token && !herKey) {
+    showLocked();
+    return Promise.resolve();
+  }
   if (refreshing) return refreshing;
   const slow = setTimeout(() => ($('waking').hidden = false), 2500);
   refreshing = api('/api/state')
     .then((s) => {
+      if (s.locked) {
+        if (token) {
+          token = null;
+          save('kitty_token', null);
+        }
+        if (herKey && !token) {
+          herKey = null;
+          save('kitty_key', null);
+        }
+        state = null;
+        save('kitty_state', null);
+        return showLocked();
+      }
+      const wasUnlocked = unlocked();
       state = s;
       save('kitty_state', s);
-      if (token && !s.isSender) {
-        token = null;
-        save('kitty_token', null);
-      }
-      render();
+      renderAll();
       syncPush();
+      if (s.pendingGift) maybeShowGift(s.pendingGift);
+      if (!wasUnlocked && s.unlocked && s.me === 'her') $('nav').classList.add('fresh');
     })
     .catch(() => {})
     .finally(() => {
@@ -130,7 +295,180 @@ function refresh() {
   return refreshing;
 }
 
-// ---------- Notifications ----------
+function showLocked() {
+  $('app').hidden = true;
+  $('locked').hidden = false;
+}
+
+function renderAll() {
+  $('locked').hidden = true;
+  $('app').hidden = false;
+  const full = unlocked();
+  $('nav').hidden = !full;
+  document.body.classList.toggle('no-nav', !full);
+  $('fab').hidden = !full;
+  document.querySelectorAll('.him-only').forEach((e) => (e.hidden = me() !== 'him'));
+  $('lock-btn').hidden = me() !== 'him';
+  if (!full && currentView() !== 'home') location.hash = '';
+  renderHome();
+  const v = currentView();
+  if (v === 'calendar') renderCalendar();
+  if (v === 'dates') renderDates();
+}
+
+// ---------- Home ----------
+
+function renderHome() {
+  $('today').textContent = new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+  if (!state) return;
+  renderClocks();
+
+  const kitty = state.current;
+  const frame = $('kitty-frame');
+  const img = $('kitty-img');
+  if (kitty) {
+    frame.classList.remove('empty');
+    if (img.dataset.src !== kitty.imageUrl) {
+      img.dataset.src = kitty.imageUrl;
+      frame.classList.add('loading');
+      img.onload = img.onerror = () => frame.classList.remove('loading');
+      img.src = kitty.imageUrl;
+    }
+    const fromMe = kitty.from === me();
+    $('kitty-label').textContent = kitty.from === 'daily' ? "☀️ Today's kitty" : fromMe ? '💌 You sent this one' : '💌 A special one from your sweetie';
+    $('kitty-caption').textContent = kitty.caption || '';
+    $('kitty-caption').hidden = !kitty.caption;
+    $('kitty-time').textContent = `Arrived ${formatTime(kitty.sentAt)}`;
+    $('kitty-credit').textContent = kitty.credit ? `📷 ${kitty.credit}` : '';
+  } else {
+    frame.classList.remove('loading');
+    frame.classList.add('empty');
+  }
+
+  const note = state.note;
+  const showNote = note && Date.now() - note.at < 864e5;
+  $('note').hidden = !showNote;
+  if (showNote) {
+    $('note-text').textContent = note.message;
+    $('note-time').textContent = formatTime(note.at);
+  }
+
+  const full = unlocked();
+  const latest = full && state.latest && Date.now() - state.latest.at < 3 * 864e5 && (!kitty || state.latest.id !== kitty.postId) ? state.latest : null;
+  $('latest').hidden = !latest;
+  if (latest) {
+    $('latest-label').textContent = latest.kind === 'video' ? '🎬 New video from your sweetie' : '📸 New photo from your sweetie';
+    const box = $('latest-media');
+    if (box.dataset.id !== latest.id) {
+      box.dataset.id = latest.id;
+      box.innerHTML = '';
+      box.append(latest.kind === 'video'
+        ? el('video', { src: latest.url, controls: true, playsinline: true, preload: 'metadata' })
+        : el('img', { src: latest.url, alt: '', onclick: () => openViewer(latest) }));
+    }
+  }
+
+  const doodle = full && state.doodle && Date.now() - state.doodle.at < 3 * 864e5 ? state.doodle : null;
+  $('doodle-card').hidden = !doodle;
+  if (doodle) $('doodle-img').src = doodle.url;
+
+  $('nudge').hidden = !full;
+
+  // Countdown chips
+  const chips = $('chips');
+  chips.innerHTML = '';
+  if (full) {
+    const trip = upcoming(state.events || [], 1, (e) => e.type === 'trip')[0];
+    if (trip) {
+      const n = daysBetween(todayStr(), trip.ev.start);
+      chips.append(el('span', { class: 'pill' }, n <= 0 ? '💞 Together right now!' : `✈️ ${n} day${n > 1 ? 's' : ''} until ${trip.ev.title}`));
+    }
+    if (state.togetherSince) {
+      const n = daysBetween(state.togetherSince, todayStr());
+      if (n >= 0) chips.append(el('span', { class: 'pill lav' }, `💞 ${n.toLocaleString()} days together`));
+    }
+  }
+  chips.hidden = !chips.children.length;
+
+  const next = full ? upcoming(state.events || [], 3) : [];
+  $('upnext').hidden = !next.length;
+  $('upnext-list').innerHTML = '';
+  next.forEach((x) => $('upnext-list').append(eventRow(x.ev, x.date)));
+}
+
+let clockTimer;
+function renderClocks() {
+  const other = me() === 'him' ? 'her' : 'him';
+  const theirTz = state && state.tz && state.tz[other];
+  const show = theirTz && theirTz !== myTz;
+  $('clocks').hidden = !show;
+  clearInterval(clockTimer);
+  if (!show) return;
+  const fmt = (tz) => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: tz });
+  const draw = () => ($('clocks').textContent = `🕐 You ${fmt(myTz)}  ·  💕 Sweetie ${fmt(theirTz)}`);
+  draw();
+  clockTimer = setInterval(draw, 30_000);
+}
+
+// Double-tap the kitty to send a heart.
+let lastKittyTap = 0;
+$('kitty-frame').addEventListener('click', (e) => {
+  const now = Date.now();
+  if (now - lastKittyTap < 350 && state && state.current && state.current.postId) {
+    heartBurst($('heart-burst'), e);
+    api('/api/heart', { postId: state.current.postId }).catch(() => {});
+    lastKittyTap = 0;
+  } else lastKittyTap = now;
+});
+
+function heartBurst(container, e) {
+  const rect = container.getBoundingClientRect();
+  container.append(el('span', { class: 'big' }, '💖'));
+  for (let i = 0; i < 6; i++) {
+    const s = el('span', {}, ['💕', '💖', '✨', '🩷'][i % 4]);
+    s.style.left = `${(e ? e.clientX - rect.left : rect.width / 2) + (Math.random() - 0.5) * 120}px`;
+    s.style.top = `${(e ? e.clientY - rect.top : rect.height / 2) + (Math.random() - 0.5) * 60}px`;
+    s.style.animationDelay = `${i * 60}ms`;
+    container.append(s);
+  }
+  setTimeout(() => (container.innerHTML = ''), 1300);
+}
+
+$('nudge').onclick = async () => {
+  $('nudge').classList.remove('sent');
+  void $('nudge').offsetWidth;
+  $('nudge').classList.add('sent');
+  try {
+    const r = await api('/api/nudge', {});
+    toast(r.throttled ? 'Sent just now already 💕' : 'Sent! They know you are thinking of them 💭');
+  } catch (e) {
+    toast(`Oops 😿 ${e.message}`);
+  }
+};
+$('draw-back').onclick = () => (location.hash = '#draw');
+
+// ---------- Router ----------
+
+const VIEWS = ['home', 'memories', 'draw', 'calendar', 'dates'];
+const currentView = () => {
+  const v = location.hash.slice(1);
+  return VIEWS.includes(v) && (v === 'home' || unlocked()) ? v : 'home';
+};
+
+function route() {
+  const v = currentView();
+  VIEWS.forEach((name) => ($(`view-${name}`).hidden = name !== v));
+  document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === v));
+  window.scrollTo(0, 0);
+  if (v === 'memories') loadMemories();
+  if (v === 'draw') openDraw();
+  if (v === 'calendar') renderCalendar();
+  if (v === 'dates') renderDates();
+  if (v !== 'home') $('nav').classList.remove('fresh');
+}
+window.addEventListener('hashchange', route);
+
+// ---------- Notifications & install ----------
 
 const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
@@ -147,8 +485,7 @@ async function syncPush() {
     const reg = await navigator.serviceWorker.ready;
     const key = urlBase64ToUint8Array(state.vapidKey);
     let sub = await reg.pushManager.getSubscription();
-    if (sub && sub.options.applicationServerKey &&
-        new Uint8Array(sub.options.applicationServerKey).toString() !== key.toString()) {
+    if (sub && sub.options.applicationServerKey && new Uint8Array(sub.options.applicationServerKey).toString() !== key.toString()) {
       await sub.unsubscribe();
       sub = null;
     }
@@ -162,14 +499,10 @@ async function syncPush() {
 $('notif-btn').onclick = async () => {
   const result = await Notification.requestPermission();
   if (result === 'granted') {
-    toast('Kitty notifications on 🔔');
+    toast('Notifications on 🔔');
     syncPush();
-  } else {
-    $('notif').hidden = true;
-  }
+  } else $('notif').hidden = true;
 };
-
-// ---------- Install banner ----------
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -198,14 +531,13 @@ $('title').addEventListener('click', () => {
   setTimeout(() => $('title').classList.remove('tapped'), 150);
   if (taps >= 7) {
     taps = 0;
-    if (token && state && state.isSender) return openPanel();
+    if (me() === 'him') return openSheet('tab-settings');
     $('passphrase').value = '';
     $('unlock-error').hidden = true;
     $('unlock').hidden = false;
     $('passphrase').focus();
   }
 });
-
 $('unlock-cancel').onclick = () => ($('unlock').hidden = true);
 $('unlock-form').onsubmit = async (e) => {
   e.preventDefault();
@@ -214,6 +546,7 @@ $('unlock-form').onsubmit = async (e) => {
   try {
     const r = await api('/api/unlock', { passphrase });
     if (!r.ok) {
+      $('unlock-error').textContent = 'Nope 🙀';
       $('unlock-error').hidden = false;
       return;
     }
@@ -228,49 +561,75 @@ $('unlock-form').onsubmit = async (e) => {
   }
 };
 
-// ---------- Sweetie panel ----------
+// Also reachable without the secret taps.
+$('locked').addEventListener('click', (() => {
+  let n = 0;
+  let t = 0;
+  return () => {
+    n = Date.now() - t < 600 ? n + 1 : 1;
+    t = Date.now();
+    if (n >= 7) {
+      n = 0;
+      $('unlock').hidden = false;
+      $('passphrase').focus();
+    }
+  };
+})());
 
-function openPanel() {
-  $('panel').hidden = false;
-  history.pushState({ panel: true }, '');
-  if (!$('pool').children.length) loadPool();
-}
-function closePanel() {
-  $('panel').hidden = true;
-}
-window.addEventListener('popstate', closePanel);
-$('fab').onclick = openPanel;
-$('panel-close').onclick = () => history.back();
+// ---------- Send sheet ----------
 
-$('panel-lock').onclick = async () => {
+let picked = null; // { imageUrl, credit } | { blob, kind: 'photo' } | { file, kind: 'video' }
+
+function openSheet(tabId = 'tab-kitty') {
+  $('sheet').hidden = false;
+  history.pushState({ sheet: true }, '');
+  selectTab(tabId);
+}
+function closeSheet() {
+  $('sheet').hidden = true;
+}
+window.addEventListener('popstate', () => {
+  if (!$('sheet').hidden) closeSheet();
+  if (!$('viewer').hidden) closeViewer();
+});
+$('fab').onclick = () => openSheet();
+document.querySelectorAll('[data-close-sheet]').forEach((b) => (b.onclick = () => history.back()));
+
+function selectTab(id) {
+  document.querySelectorAll('#sheet-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === id));
+  document.querySelectorAll('#sheet .tab-body').forEach((b) => (b.hidden = b.id !== id));
+  if (id === 'tab-kitty' && !$('pool').children.length) loadPool();
+  if (id === 'tab-gift') loadGifts();
+  if (id === 'tab-settings') loadSettings();
+}
+document.querySelectorAll('#sheet-tabs .tab').forEach((t) => (t.onclick = () => selectTab(t.dataset.tab)));
+
+$('lock-btn').onclick = async () => {
   await api('/api/lock', {}).catch(() => {});
   token = null;
   save('kitty_token', null);
-  if (state) state.isSender = false;
+  state = null;
+  save('kitty_state', null);
+  closeSheet();
   history.back();
-  render();
-  syncPush(); // this phone goes back to getting love notes
   toast('Sweetie mode hidden 🤫');
+  refresh();
 };
 
-document.querySelectorAll('.tab').forEach((tab) => {
-  tab.onclick = () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-    document.querySelectorAll('.tab-body').forEach((b) => (b.hidden = b.id !== tab.dataset.tab));
-  };
-});
-
 // Kitty tab
-
-function showPicked(src) {
-  $('picked-img').src = src;
+function showPicked(node) {
+  const box = $('picked-preview');
+  box.innerHTML = '';
+  box.append(node);
   $('picked').hidden = false;
   $('picked').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 function clearPicked() {
   picked = null;
   $('picked').hidden = true;
+  $('picked-preview').innerHTML = '';
   $('caption').value = '';
+  setProgress($('upload-bar'), null);
   document.querySelectorAll('.pool img.selected').forEach((i) => i.classList.remove('selected'));
 }
 $('cancel-pick').onclick = clearPicked;
@@ -279,20 +638,30 @@ async function loadPool() {
   const pool = $('pool');
   pool.innerHTML = '<div class="loading-cell">Fetching kitties… 🐾</div>';
   try {
-    const { urls } = await api('/api/pool');
+    const { items, stats } = await api('/api/pool');
+    $('pool-stats').textContent = me() === 'him' ? `· ${stats.total} kitties` : '';
     pool.innerHTML = '';
-    for (const url of urls) {
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = 'Kitty';
-      img.loading = 'lazy';
+    for (const item of items) {
+      const img = el('img', { src: item.url, alt: 'Kitty', loading: 'lazy' });
       img.onclick = () => {
         document.querySelectorAll('.pool img.selected').forEach((i) => i.classList.remove('selected'));
         img.classList.add('selected');
-        picked = { imageUrl: url };
-        showPicked(url);
+        picked = { imageUrl: item.url, credit: item.credit };
+        showPicked(el('img', { src: item.url, alt: '' }));
       };
-      pool.appendChild(img);
+      const cell = el('div', { class: 'cell' }, img);
+      if (me() === 'him') {
+        cell.append(el('button', {
+          class: 'x',
+          title: 'Never show this one',
+          onclick: async () => {
+            if (!confirm('Remove this kitty from the pool forever?')) return;
+            await api('/api/pool/remove', { url: item.url }).catch(() => {});
+            cell.remove();
+          },
+        }, '✕'));
+      }
+      pool.append(cell);
     }
   } catch {
     pool.innerHTML = '<div class="loading-cell">Couldn\'t fetch kitties right now 😿</div>';
@@ -300,90 +669,840 @@ async function loadPool() {
 }
 $('more').onclick = loadPool;
 
-// Shrinks a gallery photo so it uploads quickly (and fixes its rotation).
-async function resizeImage(file, max = 1600, quality = 0.85) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.naturalWidth * scale);
-    canvas.height = Math.round(img.naturalHeight * scale);
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', quality);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 $('gallery').onchange = async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
+  document.querySelectorAll('.pool img.selected').forEach((i) => i.classList.remove('selected'));
+  if (file.type.startsWith('video/')) {
+    picked = { file, kind: 'video' };
+    showPicked(el('video', { src: URL.createObjectURL(file), controls: true, playsinline: true }));
+    return;
+  }
   try {
-    const image = await resizeImage(file);
-    document.querySelectorAll('.pool img.selected').forEach((i) => i.classList.remove('selected'));
-    picked = { image };
-    showPicked(image);
+    const blob = await resizeImage(file);
+    picked = { blob, kind: 'photo' };
+    showPicked(el('img', { src: URL.createObjectURL(blob), alt: '' }));
   } catch {
     toast("Can't read that photo 😿 Try another one");
   }
 };
 
-async function withButton(btn, label, fn) {
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = label;
-  try {
-    await fn();
-  } catch (e) {
-    toast(`Oops, that didn't send 😿 (${e.message})`);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = original;
-  }
-}
-
 $('send-kitty').onclick = () => {
   if (!picked) return;
   withButton($('send-kitty'), 'Sending…', async () => {
-    const r = await api('/api/send-kitty', { ...picked, caption: $('caption').value });
-    toast(picked.image ? 'Photo sent! 📸💕' : 'Kitty sent! 🐱💕');
+    const caption = $('caption').value;
+    let body;
+    if (picked.imageUrl) body = { imageUrl: picked.imageUrl, credit: picked.credit, caption };
+    else {
+      const file = picked.blob || picked.file;
+      const up = await upload(file, file.name || 'photo.jpg', (f) => setProgress($('upload-bar'), f));
+      body = { mediaId: up.id, caption };
+    }
+    const post = await api('/api/send-kitty', body);
+    toast({ kitty: 'Kitty sent! 🐱💕', photo: 'Photo sent! 📸💕', video: 'Video sent! 🎬💕' }[post.kind]);
     clearPicked();
-    state = { ...state, current: r.current };
-    save('kitty_state', state);
-    render();
+    refresh();
   });
 };
 
 // Note tab
-
 for (const text of NOTE_PRESETS) {
-  const chip = document.createElement('button');
-  chip.className = 'chip';
-  chip.textContent = text;
-  chip.onclick = () => ($('note-input').value = text);
-  $('presets').appendChild(chip);
+  $('presets').append(el('button', { class: 'chip', onclick: () => ($('note-input').value = text) }, text));
 }
-
 $('send-note').onclick = () => {
   const message = $('note-input').value.trim();
   if (!message) return toast('Write something first 💭');
   withButton($('send-note'), 'Sending…', async () => {
     const r = await api('/api/send-note', { message });
     $('note-input').value = '';
-    toast(r.delivered ? 'Note sent! 💌' : "Note saved 💌 (her notifications aren't on yet)");
+    toast(r.delivered ? 'Note sent! 💌' : "Note saved 💌 (their notifications aren't on yet)");
   });
 };
+
+// Gift tab (his side)
+const giftDraft = { mediaId: null, musicId: null };
+
+async function loadGifts() {
+  const list = $('gift-list');
+  list.innerHTML = '';
+  let gifts = [];
+  try {
+    ({ gifts } = await api('/api/gifts'));
+  } catch {
+    return;
+  }
+  if (!gifts.length) return;
+  const card = el('section', { class: 'card form-card' }, el('h3', { class: 'section-title tight' }, 'Your gifts'));
+  for (const g of gifts) {
+    const thumb = g.mime.startsWith('video/')
+      ? el('video', { class: 'thumb', src: g.url + '#t=0.5', muted: true, preload: 'metadata' })
+      : el('img', { class: 'thumb', src: g.url, alt: '' });
+    const status = { draft: 'Not sent yet', sent: 'Sent, waiting to be opened', opened: `Opened ${g.openedAt ? formatTime(g.openedAt) : ''} 💖` }[g.status];
+    card.append(el('div', { class: 'gift-item' },
+      thumb,
+      el('div', { class: 'info' }, el('b', {}, g.title), el('span', { class: `status ${g.status}` }, status)),
+    ));
+    card.append(el('div', { class: 'row' },
+      el('button', { class: 'btn small outline', onclick: () => { closeSheet(); history.back(); showGift(g, true); } }, '👀 Preview'),
+      g.status === 'draft'
+        ? el('button', {
+          class: 'btn small',
+          onclick: async (e) => {
+            if (!confirm('Send this gift to her now? 🎁')) return;
+            await withButton(e.target, 'Sending…', async () => {
+              const r = await api(`/api/gifts/${g.id}/send`, {});
+              toast(r.delivered ? 'Gift sent! 🎁 Now wait for the magic…' : "Gift sent 🎁 (her notifications aren't on yet, she'll see it when she opens the app)");
+              loadGifts();
+            });
+          },
+        }, '🎁 Send now')
+        : null,
+      el('button', {
+        class: 'btn small ghost danger',
+        onclick: async () => {
+          if (!confirm('Delete this gift?')) return;
+          await api(`/api/gifts/${g.id}`, null, 'DELETE').catch(() => {});
+          loadGifts();
+        },
+      }, 'Delete'),
+    ));
+  }
+  list.append(card);
+}
+
+$('gift-file').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  giftDraft.mediaId = null;
+  try {
+    const blob = file.type.startsWith('image/') ? await resizeImage(file, 2400, 0.9) : file;
+    const up = await upload(blob, file.name, (f) => setProgress($('gift-file-bar'), f));
+    giftDraft.mediaId = up.id;
+    toast('Uploaded ✅');
+  } catch (err) {
+    setProgress($('gift-file-bar'), null);
+    e.target.value = '';
+    toast(`Upload failed 😿 ${err.message}`);
+  }
+};
+$('gift-music').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  giftDraft.musicId = null;
+  try {
+    const up = await upload(file, file.name, (f) => setProgress($('gift-music-bar'), f));
+    giftDraft.musicId = up.id;
+    toast('Music uploaded 🎶');
+  } catch (err) {
+    setProgress($('gift-music-bar'), null);
+    e.target.value = '';
+    toast(`Upload failed 😿 ${err.message}`);
+  }
+};
+$('gift-save').onclick = () => {
+  if (!giftDraft.mediaId) return toast('Pick the video or photo first (and wait for the upload) 🎬');
+  withButton($('gift-save'), 'Saving…', async () => {
+    await api('/api/gifts', {
+      mediaId: giftDraft.mediaId,
+      musicId: giftDraft.musicId,
+      title: $('gift-title').value,
+      message: $('gift-message').value,
+      teaser: $('gift-teaser').value,
+      unlocks: $('gift-unlocks').checked,
+    });
+    giftDraft.mediaId = giftDraft.musicId = null;
+    ['gift-file', 'gift-music', 'gift-title', 'gift-message', 'gift-teaser'].forEach((id) => ($(id).value = ''));
+    setProgress($('gift-file-bar'), null);
+    setProgress($('gift-music-bar'), null);
+    toast('Gift saved 🎁 Preview it, then send it when the moment is right');
+    loadGifts();
+  });
+};
+
+// Settings tab (his side)
+async function loadSettings() {
+  if (!state) return;
+  $('her-link').value = state.herLink || '';
+  $('her-unlocked').checked = !!state.herUnlocked;
+  try {
+    const [{ used, limit }, { stats }] = await Promise.all([api('/api/storage'), api('/api/pool')]);
+    setProgress($('storage-bar'), used / limit);
+    $('storage-info').textContent = `${(used / 1048576).toFixed(0)} MB of ${(limit / 1048576).toFixed(0)} MB used for photos, videos and music`;
+    $('pool-info').textContent = `${stats.total} kitties in the pool, ${stats.used} already shown. The daily kitty never repeats until all have been shown.`;
+  } catch { /* offline */ }
+}
+$('copy-link').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('her-link').value);
+    toast('Link copied 📋');
+  } catch {
+    $('her-link').select();
+  }
+};
+$('share-link').onclick = () => {
+  if (navigator.share) navigator.share({ title: 'Daily Kitty 🐾', text: 'A little something for you 🐱', url: $('her-link').value }).catch(() => {});
+  else $('copy-link').click();
+};
+$('new-link').onclick = async () => {
+  if (!confirm('Make a new link? The old one stops working (her phone too, until she opens the new link).')) return;
+  state = await api('/api/settings', { newHerLink: true });
+  loadSettings();
+};
+$('her-unlocked').onchange = async (e) => {
+  state = await api('/api/settings', { herUnlocked: e.target.checked });
+  toast(e.target.checked ? 'Her full app is unlocked 🔓' : 'Her app is back to just kitties 🔒');
+};
+$('pool-add').onchange = async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  let n = 0;
+  for (const file of files) {
+    try {
+      const blob = await resizeImage(file, 1600, 0.88);
+      const up = await upload(blob, file.name);
+      await api('/api/pool/add', { mediaId: up.id });
+      n++;
+    } catch { /* skip */ }
+  }
+  toast(`${n} kitt${n === 1 ? 'y' : 'ies'} added to the pool 🐱`);
+  loadSettings();
+};
+
+// ---------- Memories ----------
+
+let posts = [];
+let memFilter = 'all';
+const MEM_FILTERS = [
+  ['all', 'All'],
+  ['us', '💌 From us'],
+  ['photo', '📸 Photos'],
+  ['video', '🎬 Videos'],
+  ['doodle', '🎨 Drawings'],
+  ['gift', '🎁 Gifts'],
+  ['kitty', '🐱 Kitties'],
+];
+MEM_FILTERS.forEach(([key, label]) => {
+  $('mem-filters').append(el('button', {
+    'data-f': key,
+    class: key === memFilter ? 'active' : '',
+    onclick: () => {
+      memFilter = key;
+      document.querySelectorAll('#mem-filters button').forEach((b) => b.classList.toggle('active', b.dataset.f === key));
+      renderMemories();
+    },
+  }, label));
+});
+
+async function loadPosts() {
+  try {
+    ({ posts } = await api('/api/posts'));
+  } catch { /* offline */ }
+  return posts;
+}
+
+async function loadMemories() {
+  renderMemories();
+  await loadPosts();
+  renderMemories();
+}
+
+function memItem(p) {
+  const badge = { video: '▶ video', doodle: '🎨', gift: '🎁', photo: '📸' }[p.kind];
+  const media = p.mime && p.mime.startsWith('video/')
+    ? el('video', { src: p.url + '#t=0.5', muted: true, preload: 'metadata', playsinline: true })
+    : el('img', { src: p.url, alt: '', loading: 'lazy' });
+  return el('button', { class: `mem-item kind-${p.kind}`, onclick: () => openViewer(p) },
+    media,
+    badge ? el('span', { class: 'badge' }, badge) : null,
+    p.hearts && Object.keys(p.hearts).length ? el('span', { class: 'heart' }, '💖') : null);
+}
+
+function renderMemories() {
+  const list = posts.filter((p) => {
+    if (memFilter === 'all') return true;
+    if (memFilter === 'us') return p.from !== 'daily';
+    return p.kind === memFilter;
+  });
+  const grid = $('mem-grid');
+  grid.innerHTML = '';
+  list.forEach((p) => grid.append(memItem(p)));
+  $('mem-empty').hidden = list.length > 0;
+}
+
+// ---------- Viewer ----------
+
+let viewing = null;
+function openViewer(p) {
+  viewing = p;
+  const box = $('viewer-media');
+  box.innerHTML = '';
+  box.append(p.mime && p.mime.startsWith('video/')
+    ? el('video', { src: p.url, controls: true, autoplay: true, playsinline: true })
+    : el('img', { src: p.url, alt: '', class: p.kind === 'doodle' ? 'doodle' : '' }));
+  const who = p.from === 'daily' ? '☀️ Daily kitty' : p.from === me() ? 'From you' : 'From your sweetie';
+  $('viewer-caption').textContent = p.caption || '';
+  $('viewer-caption').hidden = !p.caption;
+  $('viewer-meta').textContent = `${who} · ${formatTime(p.at)}${p.credit ? ` · 📷 ${p.credit}` : ''}`;
+  $('viewer-download').href = p.download || p.url;
+  $('viewer-heart').textContent = p.hearts && p.hearts[me()] ? '💖 Loved' : '🤍 Love';
+  $('viewer-delete').hidden = !(p.from === me() || (me() === 'him' && p.from === 'daily'));
+  $('viewer-replay').hidden = p.kind !== 'gift';
+  $('viewer').hidden = false;
+  history.pushState({ viewer: true }, '');
+}
+function closeViewer() {
+  $('viewer').hidden = true;
+  $('viewer-media').innerHTML = '';
+  viewing = null;
+}
+$('viewer-close').onclick = () => history.back();
+$('viewer-heart').onclick = async () => {
+  if (!viewing) return;
+  viewing.hearts = { ...(viewing.hearts || {}), [me()]: Date.now() };
+  $('viewer-heart').textContent = '💖 Loved';
+  api('/api/heart', { postId: viewing.id }).catch(() => {});
+};
+$('viewer-delete').onclick = async () => {
+  if (!viewing || !confirm('Delete this for both of you?')) return;
+  await api(`/api/posts/${viewing.id}`, null, 'DELETE').catch((e) => toast(e.message));
+  posts = posts.filter((p) => p.id !== viewing.id);
+  history.back();
+  renderMemories();
+  renderDoodleBook();
+  refresh();
+};
+$('viewer-replay').onclick = () => {
+  const p = viewing;
+  history.back();
+  showGift({ id: p.giftId, url: p.url, mime: p.mime, musicUrl: p.musicUrl, title: p.caption, message: p.message || '', teaser: 'Your gift 🎁' }, true);
+};
+
+// ---------- Draw ----------
+
+const padCanvas = $('pad');
+const pctx = padCanvas.getContext('2d');
+let strokes = [];
+let stroke = null;
+let penColor = COLORS[1];
+let penSize = SIZES[1];
+let erasing = false;
+
+COLORS.forEach((c, i) => {
+  const b = el('button', { title: c, class: i === 1 ? 'active' : '' });
+  b.style.background = c;
+  b.onclick = () => {
+    penColor = c;
+    erasing = false;
+    $('eraser').classList.remove('active');
+    document.querySelectorAll('#colors button').forEach((x) => x.classList.toggle('active', x === b));
+  };
+  $('colors').append(b);
+});
+SIZES.forEach((s, i) => {
+  const dot = el('i');
+  dot.style.width = dot.style.height = `${s + 3}px`;
+  const b = el('button', { class: i === 1 ? 'active' : '' }, dot);
+  b.onclick = () => {
+    penSize = s;
+    document.querySelectorAll('#sizes button').forEach((x) => x.classList.toggle('active', x === b));
+  };
+  $('sizes').append(b);
+});
+$('eraser').onclick = () => {
+  erasing = !erasing;
+  $('eraser').classList.toggle('active', erasing);
+};
+$('undo').onclick = () => {
+  strokes.pop();
+  redrawPad();
+};
+$('clear').onclick = () => {
+  if (strokes.length > 3 && !confirm('Clear the whole drawing?')) return;
+  strokes = [];
+  redrawPad();
+};
+
+function sizePad() {
+  const w = padCanvas.clientWidth;
+  if (!w) return;
+  const dpr = window.devicePixelRatio || 1;
+  padCanvas.width = Math.round(w * dpr);
+  padCanvas.height = Math.round(w * dpr);
+  redrawPad();
+}
+
+function drawStroke(ctx, s, W, from = 1) {
+  ctx.strokeStyle = s.color;
+  ctx.fillStyle = s.color;
+  ctx.lineWidth = (s.size * W) / 360;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const pts = s.points;
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0][0] * W, pts[0][1] * W, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(pts[from - 1][0] * W, pts[from - 1][1] * W);
+  for (let i = from; i < pts.length; i++) ctx.lineTo(pts[i][0] * W, pts[i][1] * W);
+  ctx.stroke();
+}
+
+function redrawPad(ctx = pctx, W = padCanvas.width) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, W);
+  strokes.forEach((s) => drawStroke(ctx, s, W));
+}
+
+function padPoint(e) {
+  const r = padCanvas.getBoundingClientRect();
+  return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.width))];
+}
+padCanvas.addEventListener('pointerdown', (e) => {
+  try {
+    padCanvas.setPointerCapture(e.pointerId);
+  } catch { /* not a real pointer */ }
+  stroke = { color: erasing ? '#ffffff' : penColor, size: erasing ? penSize * 2.5 : penSize, points: [padPoint(e)] };
+  strokes.push(stroke);
+  drawStroke(pctx, stroke, padCanvas.width);
+});
+padCanvas.addEventListener('pointermove', (e) => {
+  if (!stroke) return;
+  const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  const events = coalesced.length ? coalesced : [e];
+  const start = stroke.points.length;
+  events.forEach((ev) => stroke.points.push(padPoint(ev)));
+  drawStroke(pctx, stroke, padCanvas.width, start);
+});
+['pointerup', 'pointercancel'].forEach((t) => padCanvas.addEventListener(t, () => (stroke = null)));
+window.addEventListener('resize', () => !$('view-draw').hidden && sizePad());
+
+async function openDraw() {
+  requestAnimationFrame(sizePad);
+  await loadPosts();
+  renderDoodleBook();
+}
+
+function renderDoodleBook() {
+  const list = posts.filter((p) => p.kind === 'doodle');
+  const grid = $('doodle-grid');
+  grid.innerHTML = '';
+  list.forEach((p) => grid.append(memItem(p)));
+  $('doodle-empty').hidden = list.length > 0;
+}
+
+$('send-doodle').onclick = () => {
+  if (!strokes.length) return toast('Draw something first ✏️');
+  withButton($('send-doodle'), 'Sending…', async () => {
+    const out = document.createElement('canvas');
+    out.width = out.height = 1080;
+    redrawPad(out.getContext('2d'), 1080);
+    const blob = await new Promise((r) => out.toBlob(r, 'image/png'));
+    const up = await upload(blob, 'drawing.png');
+    await api('/api/doodle', { mediaId: up.id, caption: $('doodle-caption').value });
+    strokes = [];
+    redrawPad();
+    $('doodle-caption').value = '';
+    toast('Drawing sent! 🎨💕');
+    await loadPosts();
+    renderDoodleBook();
+  });
+};
+
+// ---------- Calendar ----------
+
+let calMonth = (() => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+})();
+let selectedDay = null;
+
+function eventRow(ev, date) {
+  const when = ev.type === 'trip' && ev.end
+    ? `${prettyDate(ev.start, { day: 'numeric', month: 'short' })} → ${prettyDate(ev.end, { day: 'numeric', month: 'short' })}`
+    : `${prettyDate(date || ev.start)}${ev.time ? ` · ${ev.time}` : ''}`;
+  return el('button', { class: 'event', onclick: () => openEvent({ ev }) },
+    el('span', { class: 'emoji' }, EVENT_EMOJI[ev.type] || '📌'),
+    el('span', {}, el('b', {}, ev.title), el('span', { class: 'when' }, when)),
+    date ? el('span', { class: 'in' }, inDays(date)) : null);
+}
+
+function renderCalendar() {
+  if (!state) return;
+  const events = state.events || [];
+  const today = todayStr();
+
+  // Highlights
+  const hl = $('cal-highlights');
+  hl.innerHTML = '';
+  const trip = upcoming(events, 1, (e) => e.type === 'trip')[0];
+  if (trip) {
+    const n = daysBetween(today, trip.ev.start);
+    hl.append(el('div', { class: 'highlight trip' },
+      el('div', { class: 'big' }, n <= 0 ? 'Together now 💞' : `${n} day${n > 1 ? 's' : ''}`),
+      el('div', {}, n <= 0 ? trip.ev.title : `until ${trip.ev.title} ✈️`)));
+  }
+  if (state.togetherSince) {
+    const n = daysBetween(state.togetherSince, today);
+    hl.append(el('div', { class: 'highlight love' }, el('div', { class: 'big' }, `${n.toLocaleString()} days`), el('div', {}, 'of us 💞')));
+  }
+  $('together-date').value = state.togetherSince || '';
+
+  // Month grid
+  const y = calMonth.getFullYear();
+  const m = calMonth.getMonth();
+  $('cal-month').textContent = calMonth.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  const grid = $('cal-grid');
+  grid.innerHTML = '';
+  const first = new Date(y, m, 1);
+  const offset = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const cells = Math.ceil((offset + daysInMonth) / 7) * 7;
+  for (let i = 0; i < cells; i++) {
+    const d = new Date(y, m, i - offset + 1);
+    const ds = ymd(d);
+    const on = events.filter((ev) => occursOn(ev, ds));
+    const types = [...new Set(on.map((ev) => ev.type))];
+    const cls = ['day'];
+    if (d.getMonth() !== m) cls.push('other-month');
+    if (ds === today) cls.push('today');
+    if (ds === selectedDay) cls.push('selected');
+    if (types.includes('trip')) cls.push('trip-day');
+    grid.append(el('button', {
+      class: cls.join(' '),
+      onclick: () => {
+        selectedDay = selectedDay === ds ? null : ds;
+        renderCalendar();
+      },
+    }, String(d.getDate()), el('span', { class: 'dots' }, types.map((t) => el('i', { class: `dot ${t}` })))));
+  }
+
+  // List: selected day, or upcoming
+  const list = $('day-list');
+  list.innerHTML = '';
+  if (selectedDay) {
+    $('day-title').textContent = prettyDate(selectedDay, { weekday: 'long', day: 'numeric', month: 'long' });
+    const on = events.filter((ev) => occursOn(ev, selectedDay));
+    on.forEach((ev) => list.append(eventRow(ev)));
+    if (!on.length) list.append(el('p', { class: 'hint' }, 'Nothing planned yet. Add something? 💭'));
+  } else {
+    $('day-title').textContent = 'Coming up';
+    const next = upcoming(events, 12);
+    next.forEach((x) => list.append(eventRow(x.ev, x.date)));
+    if (!next.length) list.append(el('p', { class: 'hint' }, 'Add your next trip, your anniversary, birthdays and date nights ✨'));
+  }
+}
+$('cal-prev').onclick = () => {
+  calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1);
+  renderCalendar();
+};
+$('cal-next').onclick = () => {
+  calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1);
+  renderCalendar();
+};
+$('add-event').onclick = () => openEvent({ date: selectedDay || todayStr() });
+$('together-save').onclick = async () => {
+  try {
+    state = await api('/api/settings', { togetherSince: $('together-date').value || null });
+    save('kitty_state', state);
+    toast('Saved 💞');
+    renderCalendar();
+    renderHome();
+  } catch (e) {
+    toast(e.message);
+  }
+};
+
+// Event editor
+let editing = null;
+let evType = 'date';
+function setEvType(t) {
+  evType = t;
+  document.querySelectorAll('#event-types button').forEach((b) => b.classList.toggle('active', b.dataset.type === t));
+  $('ev-end-wrap').hidden = t !== 'trip';
+  $('ev-time-wrap').hidden = t === 'trip' || t === 'special';
+  $('ev-yearly-wrap').hidden = t !== 'special';
+}
+document.querySelectorAll('#event-types button').forEach((b) => (b.onclick = () => {
+  setEvType(b.dataset.type);
+  if (b.dataset.type === 'special' && !editing) $('ev-yearly').checked = true;
+}));
+
+function openEvent({ ev, date, type, title, notes }) {
+  editing = ev || null;
+  $('event-heading').textContent = ev ? 'Edit plan' : 'New plan';
+  setEvType(ev ? ev.type : type || 'date');
+  $('ev-title').value = ev ? ev.title : title || '';
+  $('ev-start').value = ev ? ev.start : date || todayStr();
+  $('ev-end').value = ev ? ev.end || '' : '';
+  $('ev-time').value = ev ? ev.time || '' : type === 'date' ? '20:00' : '';
+  $('ev-yearly').checked = ev ? !!ev.yearly : false;
+  $('ev-notes').value = ev ? ev.notes || '' : notes || '';
+  $('ev-delete').hidden = !ev;
+  $('event-sheet').hidden = false;
+}
+$('ev-cancel').onclick = () => ($('event-sheet').hidden = true);
+$('event-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const body = {
+    id: editing && editing.id,
+    type: evType,
+    title: $('ev-title').value,
+    start: $('ev-start').value,
+    end: evType === 'trip' ? $('ev-end').value : null,
+    time: evType === 'trip' || evType === 'special' ? null : $('ev-time').value,
+    yearly: evType === 'special' && $('ev-yearly').checked,
+    notes: $('ev-notes').value,
+  };
+  try {
+    await api('/api/events', body);
+    $('event-sheet').hidden = true;
+    toast(editing ? 'Updated ✨' : 'Added to your calendar 📅');
+    await refresh();
+    renderCalendar();
+    renderDates();
+  } catch (err) {
+    toast(err.message);
+  }
+};
+$('ev-delete').onclick = async () => {
+  if (!editing || !confirm('Delete this plan?')) return;
+  await api(`/api/events/${editing.id}`, null, 'DELETE').catch(() => {});
+  $('event-sheet').hidden = true;
+  await refresh();
+  renderCalendar();
+  renderDates();
+};
+
+// ---------- Date nights ----------
+
+function renderDates() {
+  if (!state) return;
+  const planned = upcoming(state.events || [], 10, (e) => e.type === 'date');
+  $('planned').hidden = !planned.length;
+  $('planned-list').innerHTML = '';
+  planned.forEach((x) => $('planned-list').append(eventRow(x.ev, x.date)));
+
+  const box = $('ideas');
+  if (box.children.length) return;
+  for (const g of DATE_IDEAS) {
+    const grid = el('div', { class: 'ideas' });
+    for (const [emoji, title, desc] of g.items) {
+      grid.append(el('div', { class: 'idea', 'data-idea': title },
+        el('span', { class: 'e' }, emoji),
+        el('b', {}, title),
+        el('p', {}, desc),
+        el('button', { onclick: () => openEvent({ type: 'date', title: `${title} ${emoji}`, notes: desc, date: nextFriday() }) }, '🗓️ Plan it')));
+    }
+    box.append(el('section', { class: 'idea-group' }, el('h3', {}, g.group), grid));
+  }
+}
+
+function nextFriday() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || 7));
+  return ymd(d);
+}
+
+$('surprise').onclick = () => {
+  const all = [...document.querySelectorAll('.idea')];
+  const pickEl = all[Math.floor(Math.random() * all.length)];
+  pickEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  pickEl.classList.remove('flash');
+  void pickEl.offsetWidth;
+  pickEl.classList.add('flash');
+};
+
+// ---------- Gift reveal ----------
+
+let giftShownId = null;
+function maybeShowGift(gift) {
+  if (giftShownId === gift.id || !$('gift').hidden) return;
+  showGift(gift, false);
+}
+
+function fadeVolume(audio, to, ms) {
+  const from = audio.volume;
+  const startT = performance.now();
+  return new Promise((resolve) => {
+    const step = (t) => {
+      const k = Math.min(1, (t - startT) / ms);
+      audio.volume = Math.max(0, Math.min(1, from + (to - from) * k));
+      if (k < 1) requestAnimationFrame(step);
+      else resolve();
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+function showGift(gift, preview) {
+  giftShownId = gift.id;
+  const overlay = $('gift');
+  overlay.hidden = false;
+  overlay.classList.remove('revealed');
+  $('gift-stage').classList.remove('gone');
+  $('gift-reveal').hidden = true;
+  $('gift-after').hidden = true;
+  $('gift-close').hidden = !preview;
+  $('gift-title-text').classList.remove('show');
+  $('gift-media').classList.remove('show');
+  $('gift-teaser-text').textContent = preview ? '👀 Preview: this is what she will see' : 'Something special is waiting for you…';
+  const box = $('giftbox');
+  box.className = 'giftbox';
+
+  const isVideo = gift.mime && gift.mime.startsWith('video/');
+  const mediaEl = isVideo
+    ? el('video', { src: gift.url, preload: 'auto', playsinline: true })
+    : el('img', { src: gift.url, alt: '' });
+  const music = gift.musicUrl ? el('audio', { src: gift.musicUrl, preload: 'auto', loop: true }) : null;
+  $('gift-media').innerHTML = '';
+  $('gift-media').append(mediaEl);
+
+  const finish = () => {
+    if (music) fadeVolume(music, 0, 1200).then(() => music.pause());
+    if (isVideo) mediaEl.pause();
+    overlay.hidden = true;
+    $('gift-media').innerHTML = '';
+    stopConfetti();
+    if (!preview) {
+      refresh();
+      if (gift.unlocks !== false) $('nav').classList.add('fresh');
+    }
+  };
+  $('gift-close').onclick = finish;
+  $('gift-done').onclick = finish;
+
+  const showAfter = () => {
+    $('gift-message-text').textContent = gift.message || '';
+    $('gift-message-text').hidden = !gift.message;
+    $('gift-unlock-text').hidden = preview || gift.unlocks === false;
+    $('gift-done').textContent = preview ? 'Close preview' : gift.unlocks === false ? 'Close 💞' : "Let's explore 💞";
+    $('gift-after').hidden = false;
+    burstConfetti(0.5);
+  };
+
+  box.onclick = async () => {
+    box.onclick = null;
+    box.classList.add('shake');
+    if (music) {
+      music.volume = 0;
+      music.play().then(() => fadeVolume(music, 0.85, 2500)).catch(() => {});
+    }
+    if (isVideo) {
+      // Start the video inside this tap so the browser allows sound, then wait at the start.
+      mediaEl.muted = true;
+      mediaEl.play().then(() => {
+        mediaEl.pause();
+        mediaEl.currentTime = 0;
+        mediaEl.muted = false;
+      }).catch(() => (mediaEl.muted = false));
+    }
+    if (!preview) api(`/api/gifts/${gift.id}/open`, {}).catch(() => {});
+    await sleep(650);
+    box.classList.remove('shake');
+    box.classList.add('open');
+    burstConfetti(1);
+    await sleep(900);
+    $('gift-stage').classList.add('gone');
+    overlay.classList.add('revealed');
+    $('gift-reveal').hidden = false;
+    $('gift-close').hidden = false;
+    $('gift-title-text').textContent = gift.title || '🎁';
+    await sleep(100);
+    $('gift-title-text').classList.add('show');
+    await sleep(1800);
+    $('gift-media').classList.add('show');
+    if (isVideo) {
+      if (music) fadeVolume(music, 0, 1600).then(() => music.pause());
+      await sleep(400);
+      mediaEl.currentTime = 0;
+      mediaEl.onended = showAfter;
+      mediaEl.onclick = () => (mediaEl.paused ? mediaEl.play() : mediaEl.pause());
+      mediaEl.play().catch(() => {
+        const btn = el('button', { class: 'gift-play', onclick: () => { btn.remove(); mediaEl.play(); } }, '▶️');
+        $('gift-media').append(btn);
+      });
+    } else {
+      mediaEl.classList.add('kenburns');
+      await sleep(4500);
+      showAfter();
+    }
+  };
+}
+
+// Confetti: hearts, sparkles and paper bits
+const confettiCanvas = $('confetti');
+const cctx = confettiCanvas.getContext('2d');
+let particles = [];
+let confettiRaf = null;
+function burstConfetti(strength) {
+  const W = (confettiCanvas.width = innerWidth * devicePixelRatio);
+  const H = (confettiCanvas.height = innerHeight * devicePixelRatio);
+  const cx = W / 2;
+  const cy = H * 0.5;
+  const symbols = ['💖', '💕', '✨', '🌸', '💗'];
+  const colors = ['#ff7aa8', '#ffd6e5', '#ffe08a', '#b9a3f0', '#8fdcc2', '#ffffff'];
+  for (let i = 0; i < 140 * strength; i++) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.3;
+    const v = (8 + Math.random() * 14) * devicePixelRatio;
+    particles.push({
+      x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+      r: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
+      life: 1, decay: 0.006 + Math.random() * 0.008,
+      emoji: Math.random() < 0.35 ? symbols[Math.floor(Math.random() * symbols.length)] : null,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      size: (6 + Math.random() * 8) * devicePixelRatio,
+    });
+  }
+  if (!confettiRaf) confettiRaf = requestAnimationFrame(tickConfetti);
+}
+function tickConfetti() {
+  const W = confettiCanvas.width;
+  const H = confettiCanvas.height;
+  cctx.clearRect(0, 0, W, H);
+  particles = particles.filter((p) => p.life > 0 && p.y < H + 50);
+  for (const p of particles) {
+    p.vy += 0.25 * devicePixelRatio;
+    p.vx *= 0.99;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.r += p.vr;
+    p.life -= p.decay;
+    cctx.save();
+    cctx.globalAlpha = Math.max(0, p.life);
+    cctx.translate(p.x, p.y);
+    cctx.rotate(p.r);
+    if (p.emoji) {
+      cctx.font = `${p.size * 2.2}px serif`;
+      cctx.fillText(p.emoji, 0, 0);
+    } else {
+      cctx.fillStyle = p.color;
+      cctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+    }
+    cctx.restore();
+  }
+  confettiRaf = particles.length ? requestAnimationFrame(tickConfetti) : null;
+}
+function stopConfetti() {
+  particles = [];
+  cctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+}
 
 // ---------- Start ----------
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'refresh') refresh();
+    if (!e.data) return;
+    if (e.data.type === 'refresh') refresh();
+    if (e.data.type === 'open' && e.data.url) {
+      const hash = new URL(e.data.url, location.href).hash;
+      if (hash) location.hash = hash;
+      refresh();
+    }
   });
 }
 document.addEventListener('visibilitychange', () => {
@@ -391,5 +1510,6 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(() => document.visibilityState === 'visible' && refresh(), 60_000);
 
-render();
+if (state && (token || herKey)) renderAll();
+route();
 refresh();

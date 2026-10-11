@@ -1,6 +1,6 @@
 // Service worker: notifications, and an offline copy of the app so it opens instantly
 // even while the free server is waking up.
-const CACHE = 'kitty-v1';
+const CACHE = 'kitty-v2';
 const SHELL = ['/', '/style.css', '/app.js', '/manifest.webmanifest', '/icon-192.png', '/badge-96.png'];
 
 self.addEventListener('install', (event) => {
@@ -18,15 +18,17 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
+  if (req.method !== 'GET' || req.headers.has('range')) return;
   const url = new URL(req.url);
-  if (url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+  if (url.origin !== location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/dl/')) return;
 
-  // Uploaded photos never change: cache first.
-  if (url.pathname.startsWith('/img/')) {
+  // Uploaded photos and drawings never change: cache first. Videos stream from the network.
+  if (url.pathname.startsWith('/media/') || url.pathname.startsWith('/img/')) {
+    if (url.searchParams.has('dl')) return;
     event.respondWith(
       caches.match(req).then((hit) => hit || fetch(req).then((res) => {
-        if (res.ok) {
+        const type = res.headers.get('content-type') || '';
+        if (res.ok && res.status === 200 && type.startsWith('image/')) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
         }
@@ -69,14 +71,14 @@ self.addEventListener('push', (event) => {
     icon: '/icon-192.png',
     badge: '/badge-96.png',
     timestamp: Date.now(),
-    data: { url: '/' },
+    data: { url: data.url || '/' },
   };
   if (data.image) options.image = data.image;
   if (data.tag) {
     options.tag = data.tag;
     options.renotify = true;
   }
-  // Tell an open app to refresh right away.
+  if (data.type === 'gift') options.requireInteraction = true;
   const notifyClients = self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     .then((list) => list.forEach((c) => c.postMessage({ type: 'refresh' })));
   event.waitUntil(Promise.all([
@@ -87,15 +89,16 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const c of list) {
         if ('focus' in c) {
-          c.postMessage({ type: 'refresh' });
+          c.postMessage({ type: 'open', url });
           return c.focus();
         }
       }
-      return self.clients.openWindow('/');
+      return self.clients.openWindow(url);
     })
   );
 });

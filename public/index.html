@@ -3,87 +3,313 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#ffe3ec">
+  <meta name="theme-color" content="#ffe6ef">
   <title>Daily Kitty</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icon-192.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <main id="home">
-    <header>
-      <h1 id="title">Daily Kitty <span class="paw">🐾</span></h1>
-      <p id="today"></p>
-    </header>
+  <!-- Opened without her private link -->
+  <section id="locked" class="locked" hidden>
+    <img src="/icon-192.png" alt="" class="locked-icon">
+    <h1>Daily Kitty</h1>
+    <p>This little app belongs to someone special 🐾</p>
+    <p class="hint">Open it from your special link 💌</p>
+  </section>
 
-    <div id="install" class="banner" hidden>
-      <span>Add Daily Kitty to your home screen 🏠</span>
-      <button id="install-btn" class="btn small">Install</button>
-    </div>
-    <div id="notif" class="banner" hidden>
-      <span>Get a ping when a new kitty arrives 🔔</span>
-      <button id="notif-btn" class="btn small">Turn on</button>
-    </div>
+  <div id="app" hidden>
+    <!-- HOME -->
+    <main id="view-home" class="view">
+      <header class="hero">
+        <h1 id="title">Daily Kitty <span class="paw">🐾</span></h1>
+        <p id="today"></p>
+        <p id="clocks" class="clocks" hidden></p>
+      </header>
 
-    <section id="kitty" class="card">
-      <div id="kitty-frame" class="frame loading"><img id="kitty-img" alt="Today's kitty"></div>
-      <div class="kitty-text">
-        <p id="kitty-label" class="label">☀️ Today's kitty</p>
-        <p id="kitty-caption" class="caption" hidden></p>
-        <p id="kitty-time" class="time"></p>
+      <div id="chips" class="chip-row" hidden></div>
+
+      <div id="install" class="banner" hidden>
+        <span>Add Daily Kitty to your home screen 🏠</span>
+        <button id="install-btn" class="btn small">Install</button>
       </div>
-    </section>
+      <div id="notif" class="banner" hidden>
+        <span>Get a ping when something new arrives 🔔</span>
+        <button id="notif-btn" class="btn small">Turn on</button>
+      </div>
 
-    <section id="note" class="card note" hidden>
-      <p class="label">💌 Latest love note</p>
-      <p id="note-text" class="note-text"></p>
-      <p id="note-time" class="time"></p>
-    </section>
+      <section id="kitty" class="card kitty-card">
+        <div id="kitty-frame" class="frame loading">
+          <img id="kitty-img" alt="Today's kitty">
+          <div id="heart-burst" class="heart-burst" aria-hidden="true"></div>
+        </div>
+        <div class="kitty-text">
+          <p id="kitty-label" class="label">☀️ Today's kitty</p>
+          <p id="kitty-caption" class="caption" hidden></p>
+          <p class="meta"><span id="kitty-time"></span><span id="kitty-credit" class="credit"></span></p>
+        </div>
+      </section>
 
-    <p id="waking" class="hint center" hidden>Waking up the kitty server… 😴</p>
-  </main>
+      <section id="note" class="card note-card" hidden>
+        <p class="eyebrow">💌 From your sweetie</p>
+        <p id="note-text" class="note-text"></p>
+        <p id="note-time" class="meta"></p>
+      </section>
 
-  <button id="fab" class="fab" hidden>Send something 💌</button>
+      <section id="latest" class="card latest-card" hidden>
+        <p class="eyebrow" id="latest-label">📸 New from your sweetie</p>
+        <div id="latest-media" class="latest-media"></div>
+      </section>
 
-  <!-- Sweetie panel: only reachable after unlocking -->
-  <div id="panel" class="sheet" hidden>
+      <section id="doodle-card" class="card doodle-card" hidden>
+        <p class="eyebrow">🎨 Your sweetie drew you something</p>
+        <img id="doodle-img" alt="Drawing from your sweetie">
+        <button id="draw-back" class="btn soft wide">Draw back ✏️</button>
+      </section>
+
+      <button id="nudge" class="nudge" hidden><span>💭</span> Send a little "thinking of you"</button>
+
+      <section id="upnext" class="card upnext" hidden>
+        <p class="eyebrow">📅 Coming up</p>
+        <div id="upnext-list"></div>
+      </section>
+
+      <p id="waking" class="hint center" hidden>Waking up the kitty server… 😴</p>
+    </main>
+
+    <!-- MEMORIES -->
+    <main id="view-memories" class="view" hidden>
+      <header class="page-head"><h2>Memories 🖼️</h2><p class="hint">Everything you've sent each other</p></header>
+      <div id="mem-filters" class="filters"></div>
+      <div id="mem-grid" class="mem-grid"></div>
+      <p id="mem-empty" class="empty" hidden>Nothing here yet 🐾</p>
+    </main>
+
+    <!-- DRAW -->
+    <main id="view-draw" class="view" hidden>
+      <header class="page-head"><h2>Doodles 🎨</h2><p class="hint">Draw something for your sweetie</p></header>
+      <div class="pad-wrap card">
+        <canvas id="pad"></canvas>
+        <div class="pad-tools">
+          <div id="colors" class="colors"></div>
+          <div class="pad-row">
+            <div id="sizes" class="sizes"></div>
+            <button id="eraser" class="tool" title="Eraser">🧽</button>
+            <button id="undo" class="tool" title="Undo">↩️</button>
+            <button id="clear" class="tool" title="Clear">🗑️</button>
+          </div>
+        </div>
+        <input id="doodle-caption" maxlength="200" placeholder="Add a little message (optional)">
+        <button id="send-doodle" class="btn wide">Send drawing 💌</button>
+      </div>
+      <h3 class="section-title">Our doodle book 📒</h3>
+      <div id="doodle-grid" class="mem-grid"></div>
+      <p id="doodle-empty" class="empty" hidden>Your drawings will live here ✨</p>
+    </main>
+
+    <!-- CALENDAR -->
+    <main id="view-calendar" class="view" hidden>
+      <header class="page-head"><h2>Our calendar 📅</h2></header>
+      <div id="cal-highlights" class="highlights"></div>
+      <section class="card cal-card">
+        <div class="cal-head">
+          <button id="cal-prev" class="icon">‹</button>
+          <h3 id="cal-month"></h3>
+          <button id="cal-next" class="icon">›</button>
+        </div>
+        <div class="cal-dow"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+        <div id="cal-grid" class="cal-grid"></div>
+        <div class="legend"><span><i class="dot trip"></i>Trip</span><span><i class="dot date"></i>Date night</span><span><i class="dot special"></i>Special</span><span><i class="dot other"></i>Other</span></div>
+      </section>
+      <section class="card">
+        <div class="row between"><h3 id="day-title" class="section-title tight">Upcoming</h3><button id="add-event" class="btn small">+ Add</button></div>
+        <div id="day-list" class="event-list"></div>
+      </section>
+      <section class="card together">
+        <p class="eyebrow">💞 Together since</p>
+        <div class="row"><input id="together-date" type="date"><button id="together-save" class="btn small">Save</button></div>
+      </section>
+    </main>
+
+    <!-- DATE NIGHTS -->
+    <main id="view-dates" class="view" hidden>
+      <header class="page-head"><h2>Date nights 🌙</h2><p class="hint">Long-distance dates, planned together</p></header>
+      <button id="surprise" class="btn wide big">🎲 Surprise us</button>
+      <section id="planned" class="card" hidden>
+        <p class="eyebrow">🗓️ Planned</p>
+        <div id="planned-list" class="event-list"></div>
+      </section>
+      <div id="ideas"></div>
+    </main>
+
+    <nav id="nav" class="nav" hidden>
+      <a href="#home" data-view="home"><span>🏠</span>Home</a>
+      <a href="#memories" data-view="memories"><span>🖼️</span>Memories</a>
+      <a href="#draw" data-view="draw"><span>🎨</span>Draw</a>
+      <a href="#calendar" data-view="calendar"><span>📅</span>Calendar</a>
+      <a href="#dates" data-view="dates"><span>🌙</span>Dates</a>
+    </nav>
+
+    <button id="fab" class="fab" hidden>💌</button>
+  </div>
+
+  <!-- Send sheet -->
+  <div id="sheet" class="sheet" hidden>
     <div class="sheet-head">
-      <button id="panel-close" class="icon" aria-label="Back">←</button>
-      <h2>Sweetie panel 💌</h2>
-      <button id="panel-lock" class="icon" aria-label="Hide sweetie mode" title="Hide sweetie mode">🔒</button>
+      <button class="icon" data-close-sheet aria-label="Back">←</button>
+      <h2>Send something 💌</h2>
+      <button id="lock-btn" class="icon" aria-label="Hide sweetie mode" title="Hide sweetie mode" hidden>🔒</button>
     </div>
-    <div class="tabs">
-      <button class="tab active" data-tab="kitty-tab">Send a kitty 🐱</button>
-      <button class="tab" data-tab="note-tab">Send a note 💌</button>
+    <div class="tabs" id="sheet-tabs">
+      <button class="tab active" data-tab="tab-kitty">Kitty 🐱</button>
+      <button class="tab" data-tab="tab-note">Note 💌</button>
+      <button class="tab him-only" data-tab="tab-gift">Gift 🎁</button>
+      <button class="tab him-only" data-tab="tab-settings">⚙️</button>
     </div>
 
-    <div id="kitty-tab" class="tab-body">
+    <div id="tab-kitty" class="tab-body">
       <div class="row">
-        <label class="btn outline">📷 My gallery<input id="gallery" type="file" accept="image/*" hidden></label>
+        <label class="btn outline">📷 Photo or video<input id="gallery" type="file" accept="image/*,video/*" hidden></label>
         <button id="more" class="btn outline">🎲 More kitties</button>
       </div>
-      <div id="picked" hidden>
-        <img id="picked-img" alt="Selected picture">
-        <input id="caption" maxlength="150" placeholder="Add a little message (optional)">
+      <div id="picked" class="picked" hidden>
+        <div id="picked-preview" class="picked-preview"></div>
+        <input id="caption" maxlength="200" placeholder="Add a little message (optional)">
+        <div id="upload-bar" class="progress" hidden><div></div></div>
         <div class="row">
           <button id="cancel-pick" class="btn ghost">Cancel</button>
           <button id="send-kitty" class="btn">Send it 💕</button>
         </div>
       </div>
-      <p class="sub">Kitty pool, tap one to pick it</p>
+      <p class="sub">Kitty pool <span id="pool-stats" class="hint"></span></p>
       <div id="pool" class="pool"></div>
     </div>
 
-    <div id="note-tab" class="tab-body" hidden>
+    <div id="tab-note" class="tab-body" hidden>
       <p class="sub">Tap one or write your own</p>
       <div id="presets" class="chips"></div>
-      <textarea id="note-input" rows="3" maxlength="200" placeholder="Your note"></textarea>
+      <textarea id="note-input" rows="3" maxlength="300" placeholder="Your note"></textarea>
       <button id="send-note" class="btn wide">Send note 💌</button>
-      <p class="hint">She gets it as a notification straight away, and it shows in her app for a day.</p>
+    </div>
+
+    <div id="tab-gift" class="tab-body" hidden>
+      <div id="gift-list"></div>
+      <section class="card form-card">
+        <h3 class="section-title tight">New gift 🎁</h3>
+        <p class="hint">She gets a mysterious notification, unwraps a gift box, then your video (or photo) plays. Opening it unlocks her full app.</p>
+        <label class="field">Video or photo
+          <input id="gift-file" type="file" accept="video/*,image/*">
+        </label>
+        <div id="gift-file-bar" class="progress" hidden><div></div></div>
+        <label class="field">Background music while she unwraps (optional)
+          <input id="gift-music" type="file" accept="audio/*">
+        </label>
+        <div id="gift-music-bar" class="progress" hidden><div></div></div>
+        <label class="field">Title<input id="gift-title" maxlength="80" placeholder="Happy birthday, my love 🎂"></label>
+        <label class="field">Message after the video<textarea id="gift-message" rows="3" maxlength="1000" placeholder="A few words from your heart…"></textarea></label>
+        <label class="field">Notification text<input id="gift-teaser" maxlength="120" placeholder="Something special just arrived for you… ✨"></label>
+        <label class="check"><input id="gift-unlocks" type="checkbox" checked> Opening it unlocks her full app</label>
+        <button id="gift-save" class="btn wide">Save gift (not sent yet)</button>
+      </section>
+    </div>
+
+    <div id="tab-settings" class="tab-body" hidden>
+      <section class="card form-card">
+        <h3 class="section-title tight">Her private link 💌</h3>
+        <p class="hint">She must open the app from this link once (then install it). Anyone without it only sees a locked page.</p>
+        <input id="her-link" readonly>
+        <div class="row">
+          <button id="copy-link" class="btn small">Copy</button>
+          <button id="share-link" class="btn small outline">Share</button>
+          <button id="new-link" class="btn small ghost">New link</button>
+        </div>
+      </section>
+      <section class="card form-card">
+        <h3 class="section-title tight">Her app</h3>
+        <label class="check"><input id="her-unlocked" type="checkbox"> Full app unlocked for her (memories, drawings, calendar, dates)</label>
+        <p class="hint">This turns on by itself when she opens a gift.</p>
+      </section>
+      <section class="card form-card">
+        <h3 class="section-title tight">Kitty pool 🐱</h3>
+        <p id="pool-info" class="hint"></p>
+        <label class="btn outline">➕ Add my own photos to the pool<input id="pool-add" type="file" accept="image/*" multiple hidden></label>
+        <p class="hint">Tap ✕ on a kitty in the pool to never show it again.</p>
+      </section>
+      <section class="card form-card">
+        <h3 class="section-title tight">Storage</h3>
+        <div id="storage-bar" class="progress"><div></div></div>
+        <p id="storage-info" class="hint"></p>
+      </section>
+    </div>
+  </div>
+
+  <!-- Event editor -->
+  <div id="event-sheet" class="backdrop" hidden>
+    <form id="event-form" class="dialog wide-dialog">
+      <h3 id="event-heading" class="section-title tight">New plan</h3>
+      <div id="event-types" class="type-chips">
+        <button type="button" data-type="trip">✈️ Trip</button>
+        <button type="button" data-type="date">🌙 Date night</button>
+        <button type="button" data-type="special">💖 Special day</button>
+        <button type="button" data-type="other">📌 Other</button>
+      </div>
+      <label class="field">What<input id="ev-title" maxlength="80" required placeholder="Movie night 🍿"></label>
+      <div class="row">
+        <label class="field grow">Date<input id="ev-start" type="date" required></label>
+        <label class="field grow" id="ev-end-wrap">Until<input id="ev-end" type="date"></label>
+        <label class="field grow" id="ev-time-wrap">Time<input id="ev-time" type="time"></label>
+      </div>
+      <label class="check" id="ev-yearly-wrap"><input id="ev-yearly" type="checkbox"> Every year</label>
+      <label class="field">Notes<textarea id="ev-notes" rows="2" maxlength="600" placeholder="Links, ideas, what to prepare…"></textarea></label>
+      <div class="row end">
+        <button type="button" id="ev-delete" class="btn ghost danger" hidden>Delete</button>
+        <button type="button" id="ev-cancel" class="btn ghost">Cancel</button>
+        <button type="submit" class="btn">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Media viewer -->
+  <div id="viewer" class="viewer" hidden>
+    <button class="icon viewer-close" id="viewer-close" aria-label="Close">✕</button>
+    <div id="viewer-media" class="viewer-media"></div>
+    <div class="viewer-info">
+      <p id="viewer-caption" class="caption"></p>
+      <p id="viewer-meta" class="meta"></p>
+      <div class="row">
+        <a id="viewer-download" class="btn small" download>⬇️ Save</a>
+        <button id="viewer-heart" class="btn small outline">💖</button>
+        <button id="viewer-replay" class="btn small outline" hidden>🎁 Replay</button>
+        <button id="viewer-delete" class="btn small ghost danger" hidden>Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gift reveal -->
+  <div id="gift" class="gift" hidden>
+    <canvas id="confetti"></canvas>
+    <div class="sparkles"></div>
+    <button id="gift-close" class="icon gift-close" hidden aria-label="Close">✕</button>
+    <div id="gift-stage" class="gift-stage">
+      <p id="gift-teaser-text" class="gift-teaser">Something special is waiting for you…</p>
+      <button id="giftbox" class="giftbox" aria-label="Open your gift">
+        <span class="lid"><span class="bow"></span></span>
+        <span class="box"><span class="ribbon"></span></span>
+      </button>
+      <p class="gift-hint">Tap to open 🎁</p>
+    </div>
+    <div id="gift-reveal" class="gift-reveal" hidden>
+      <h2 id="gift-title-text" class="gift-title"></h2>
+      <div id="gift-media" class="gift-media"></div>
+      <div id="gift-after" class="gift-after" hidden>
+        <p id="gift-message-text" class="gift-message"></p>
+        <p id="gift-unlock-text" class="gift-unlock" hidden>✨ Your app is now fully unlocked ✨</p>
+        <button id="gift-done" class="btn big">Let's explore 💞</button>
+      </div>
     </div>
   </div>
 
