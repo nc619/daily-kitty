@@ -33,6 +33,8 @@
 
       <div id="chips" class="chip-row" hidden></div>
 
+      <div id="invites" class="invites" hidden></div>
+
       <div id="install" class="banner" hidden>
         <span>Add Daily Kitty to your home screen 🏠</span>
         <button id="install-btn" class="btn small">Install</button>
@@ -271,9 +273,35 @@
       <div class="row end">
         <button type="button" id="ev-delete" class="btn ghost danger" hidden>Delete</button>
         <button type="button" id="ev-cancel" class="btn ghost">Cancel</button>
-        <button type="submit" class="btn">Save</button>
+        <button type="submit" id="ev-submit" class="btn">Save</button>
       </div>
     </form>
+  </div>
+
+  <!-- Date invitation -->
+  <div id="invite" class="backdrop invite-backdrop" hidden>
+    <div class="invite">
+      <button id="envelope" class="envelope" aria-label="Open the invitation">
+        <span class="env-back"></span>
+        <span class="letter">💌</span>
+        <span class="env-front"></span>
+        <span class="flap"></span>
+        <span class="seal">💗</span>
+      </button>
+      <p id="invite-tap" class="invite-tap">Tap to open 💌</p>
+      <div id="invite-card" class="invite-card" hidden>
+        <p class="eyebrow">Your sweetie is inviting you to…</p>
+        <h2 id="invite-title"></h2>
+        <p id="invite-when" class="invite-when"></p>
+        <p id="invite-notes" class="invite-notes"></p>
+        <div class="invite-actions">
+          <button id="invite-yes" class="btn big">Yes! 💖</button>
+          <button id="invite-later" class="btn outline">Another time? 🗓️</button>
+          <button id="invite-no" class="btn ghost">Not this time</button>
+        </div>
+      </div>
+      <button id="invite-close" class="icon invite-close" aria-label="Close">✕</button>
+    </div>
   </div>
 
   <!-- Media viewer -->

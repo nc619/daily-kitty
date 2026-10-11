@@ -195,6 +195,7 @@ function maybeDaily() {
 }
 
 async function runDaily() {
+  cats.refreshExternal().catch((e) => console.warn('Kitty pool refresh failed:', e.message));
   const { date, hour } = localDay();
   if (hour < DAILY_HOUR) return 'too-early';
   let status = 'already-sent';
@@ -230,7 +231,7 @@ function happensOn(ev, date) {
 }
 
 async function calendarDigest(date) {
-  const today = store.db.events.filter((ev) => happensOn(ev, date));
+  const today = store.db.events.filter((ev) => happensOn(ev, date) && isConfirmed(ev));
   if (!today.length) return;
   const lines = today.map((ev) => {
     if (ev.type === 'trip' && ev.start === date) return `✈️ ${ev.title} starts today!`;
@@ -529,7 +530,11 @@ async function deleteGift(id) {
   return { ok: true };
 }
 
-// Calendar
+// Calendar. Date nights are invitations: the other one gets a notification and says yes or no.
+// Changing the date or time of a date night sends it back as a new invitation.
+const when = (ev) => `${prettyDate(ev.start)}${ev.time ? ` at ${ev.time}` : ''}`;
+const isConfirmed = (ev) => ev.type !== 'date' || !ev.status || ev.status === 'accepted';
+
 async function saveEvent(me, body) {
   const type = EVENT_TYPES[body.type] ? body.type : 'other';
   const title = cleanText(body.title, 80);
@@ -545,22 +550,50 @@ async function saveEvent(me, body) {
     yearly: !!body.yearly,
   };
   const existing = body.id && store.db.events.find((e) => e.id === body.id);
+
   if (existing) {
+    const moved = existing.start !== ev.start || existing.time !== ev.time;
     Object.assign(existing, ev, { updatedAt: Date.now() });
-    persist();
+    if (type === 'date' && (moved || existing.status === 'declined')) {
+      // A new time is a new question.
+      Object.assign(existing, { status: 'pending', requestedBy: me, respondedAt: null });
+      persist();
+      await push.toOther(me, {
+        type: 'date-invite',
+        title: '🗓️ Your sweetie suggested another time',
+        body: `${title} · ${when(existing)}`,
+        tag: `date-${existing.id}`,
+        url: `/#invite-${existing.id}`,
+      });
+    } else {
+      if (type !== 'date') delete existing.status;
+      persist();
+    }
     return existing;
   }
+
   const created = { id: newId(9), ...ev, by: me, createdAt: Date.now() };
+  if (type === 'date') Object.assign(created, { status: 'pending', requestedBy: me });
   store.db.events.push(created);
   persist();
-  await push.toOther(me, {
-    type: 'event',
-    title: `${EVENT_TYPES[type]} Your sweetie added to your calendar`,
-    body: `${title} · ${prettyDate(created.start)}${created.time ? ` at ${created.time}` : ''}`,
-    tag: 'event',
-    url: '/#calendar',
-  });
+  await push.toOther(me, type === 'date'
+    ? { type: 'date-invite', title: "💌 You've got a date invitation!", body: `${title} · ${when(created)}`, tag: `date-${created.id}`, url: `/#invite-${created.id}` }
+    : { type: 'event', title: `${EVENT_TYPES[type]} Your sweetie added to your calendar`, body: `${title} · ${when(created)}`, tag: 'event', url: '/#calendar' });
   return created;
+}
+
+async function respondToDate(me, id, answer) {
+  const ev = store.db.events.find((e) => e.id === id && e.type === 'date');
+  if (!ev) throw new HttpError(404, 'Not found');
+  if (ev.status !== 'pending') throw new HttpError(400, 'Already answered');
+  if (ev.requestedBy === me) throw new HttpError(400, 'Your sweetie has to answer this one');
+  ev.status = answer === 'yes' ? 'accepted' : 'declined';
+  ev.respondedAt = Date.now();
+  persist();
+  await push.toOther(me, answer === 'yes'
+    ? { type: 'date-answer', title: "💖 It's a date!", body: `${ev.title} · ${when(ev)}`, tag: `date-${ev.id}`, url: '/#dates' }
+    : { type: 'date-answer', title: '🥺 Maybe another time', body: `${ev.title} · ${when(ev)}. Suggest another day?`, tag: `date-${ev.id}`, url: '/#dates' });
+  return ev;
 }
 
 // ---------- Routing ----------
@@ -724,6 +757,11 @@ route('GET', '/api/events', async (req) => {
   return { events: store.db.events };
 });
 route('POST', '/api/events', async (req) => saveEvent(requireUnlocked(req), await readJson(req)));
+route('POST', '/api/events/([a-f0-9]+)/respond', async (req, [id]) => {
+  const me = requireUnlocked(req);
+  const { answer } = await readJson(req);
+  return respondToDate(me, id, answer === 'yes' ? 'yes' : 'no');
+});
 route('DELETE', '/api/events/([a-f0-9]+)', async (req, [id]) => {
   requireUnlocked(req);
   store.db.events = store.db.events.filter((e) => e.id !== id);

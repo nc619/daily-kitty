@@ -234,6 +234,9 @@ function nextOccurrence(ev, today = todayStr()) {
   return ev.start < today ? today : ev.start;
 }
 
+const isInviteForMe = (ev) => ev.type === 'date' && ev.status === 'pending' && ev.requestedBy && ev.requestedBy !== me();
+const liveEvents = () => ((state && state.events) || []).filter((ev) => ev.status !== 'declined');
+
 function upcoming(events, limit = 50, filter = () => true) {
   return events
     .filter(filter)
@@ -284,6 +287,7 @@ function refresh() {
       renderAll();
       syncPush();
       if (s.pendingGift) maybeShowGift(s.pendingGift);
+      else maybeOpenInvite();
       if (!wasUnlocked && s.unlocked && s.me === 'her') $('nav').classList.add('fresh');
     })
     .catch(() => {})
@@ -378,7 +382,7 @@ function renderHome() {
   const chips = $('chips');
   chips.innerHTML = '';
   if (full) {
-    const trip = upcoming(state.events || [], 1, (e) => e.type === 'trip')[0];
+    const trip = upcoming(liveEvents(), 1, (e) => e.type === 'trip')[0];
     if (trip) {
       const n = daysBetween(todayStr(), trip.ev.start);
       chips.append(el('span', { class: 'pill' }, n <= 0 ? '💞 Together right now!' : `✈️ ${n} day${n > 1 ? 's' : ''} until ${trip.ev.title}`));
@@ -391,8 +395,9 @@ function renderHome() {
   chips.hidden = !chips.children.length;
 
   renderWidgetCard();
+  renderInvites();
 
-  const next = full ? upcoming(state.events || [], 3) : [];
+  const next = full ? upcoming(liveEvents(), 3) : [];
   $('upnext').hidden = !next.length;
   $('upnext-list').innerHTML = '';
   next.forEach((x) => $('upnext-list').append(eventRow(x.ev, x.date)));
@@ -488,6 +493,16 @@ const currentView = () => {
 };
 
 function route() {
+  if (location.hash.startsWith('#invite-')) {
+    const id = location.hash.slice(8);
+    history.replaceState(null, '', '#home');
+    const ev = ((state && state.events) || []).find((e) => e.id === id);
+    if (ev && isInviteForMe(ev)) openInvite(ev);
+    else refresh().then(() => {
+      const fresh = ((state && state.events) || []).find((e) => e.id === id);
+      if (fresh && isInviteForMe(fresh)) openInvite(fresh);
+    });
+  }
   const v = currentView();
   VIEWS.forEach((name) => ($(`view-${name}`).hidden = name !== v));
   document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === v));
@@ -861,7 +876,10 @@ async function loadSettings() {
     const [{ used, limit }, { stats }] = await Promise.all([api('/api/storage'), api('/api/pool')]);
     setProgress($('storage-bar'), used / limit);
     $('storage-info').textContent = `${(used / 1048576).toFixed(0)} MB of ${(limit / 1048576).toFixed(0)} MB used for photos, videos and music`;
-    $('pool-info').textContent = `${stats.total} kitties in the pool, ${stats.used} already shown. The daily kitty never repeats until all have been shown.`;
+    const src = [stats.pexels && 'Pexels', stats.unsplash && 'Unsplash'].filter(Boolean);
+    $('pool-info').textContent = `${stats.total} kitties in the pool, ${stats.used} already shown`
+      + (src.length ? ` (including ${stats.external} from ${src.join(' & ')})` : '')
+      + '. The daily kitty never repeats until all have been shown.';
   } catch { /* offline */ }
 }
 $('copy-link').onclick = async () => {
@@ -1156,15 +1174,23 @@ function eventRow(ev, date) {
   const when = ev.type === 'trip' && ev.end
     ? `${prettyDate(ev.start, { day: 'numeric', month: 'short' })} → ${prettyDate(ev.end, { day: 'numeric', month: 'short' })}`
     : `${prettyDate(date || ev.start)}${ev.time ? ` · ${ev.time}` : ''}`;
-  return el('button', { class: 'event', onclick: () => openEvent({ ev }) },
+  let status = null;
+  if (ev.type === 'date' && ev.status === 'pending') {
+    status = isInviteForMe(ev) ? el('span', { class: 'status answer' }, '💌 answer me') : el('span', { class: 'status waiting' }, '⏳ waiting');
+  } else if (ev.status === 'declined') {
+    status = el('span', { class: 'status declined' }, '🥺 not this time');
+  } else if (ev.type === 'date' && ev.status === 'accepted') {
+    status = el('span', { class: 'status' }, '💖 yes');
+  }
+  return el('button', { class: `event ${ev.status === 'declined' ? 'declined' : ''}`, onclick: () => (isInviteForMe(ev) ? openInvite(ev) : openEvent({ ev })) },
     el('span', { class: 'emoji' }, EVENT_EMOJI[ev.type] || '📌'),
-    el('span', {}, el('b', {}, ev.title), el('span', { class: 'when' }, when)),
-    date ? el('span', { class: 'in' }, inDays(date)) : null);
+    el('span', {}, el('b', {}, ev.title, status), el('span', { class: 'when' }, when)),
+    date && ev.status !== 'declined' ? el('span', { class: 'in' }, inDays(date)) : null);
 }
 
 function renderCalendar() {
   if (!state) return;
-  const events = state.events || [];
+  const events = liveEvents();
   const today = todayStr();
 
   // Highlights
@@ -1197,7 +1223,7 @@ function renderCalendar() {
     const d = new Date(y, m, i - offset + 1);
     const ds = ymd(d);
     const on = events.filter((ev) => occursOn(ev, ds));
-    const types = [...new Set(on.map((ev) => ev.type))];
+    const types = [...new Set(on.map((ev) => (ev.status === 'pending' ? 'date pending' : ev.type)))];
     const cls = ['day'];
     if (d.getMonth() !== m) cls.push('other-month');
     if (ds === today) cls.push('today');
@@ -1257,6 +1283,7 @@ function setEvType(t) {
   $('ev-end-wrap').hidden = t !== 'trip';
   $('ev-time-wrap').hidden = t === 'trip' || t === 'special';
   $('ev-yearly-wrap').hidden = t !== 'special';
+  $('ev-submit').textContent = t === 'date' && !editing ? 'Send invitation 💌' : 'Save';
 }
 document.querySelectorAll('#event-types button').forEach((b) => (b.onclick = () => {
   setEvType(b.dataset.type);
@@ -1292,7 +1319,10 @@ $('event-form').onsubmit = async (e) => {
   try {
     await api('/api/events', body);
     $('event-sheet').hidden = true;
-    toast(editing ? 'Updated ✨' : 'Added to your calendar 📅');
+    const moved = editing && (editing.start !== body.start || (editing.time || '') !== (body.time || ''));
+    toast(evType === 'date' && (!editing || moved || editing.status === 'declined')
+      ? 'Invitation sent 💌 Waiting for your sweetie…'
+      : editing ? 'Updated ✨' : 'Added to your calendar 📅');
     await refresh();
     renderCalendar();
     renderDates();
@@ -1309,11 +1339,80 @@ $('ev-delete').onclick = async () => {
   renderDates();
 };
 
+// ---------- Date invitations ----------
+
+function renderInvites() {
+  const box = $('invites');
+  box.innerHTML = '';
+  const invites = unlocked() ? liveEvents().filter(isInviteForMe) : [];
+  invites.forEach((ev) => box.append(el('button', { class: 'invite-chip', onclick: () => openInvite(ev) },
+    el('span', { class: 'env' }, '💌'),
+    el('span', {}, el('b', {}, 'You have a date invitation!'), el('span', { class: 'small' }, 'Tap to open it')))));
+  box.hidden = !invites.length;
+}
+
+const inviteKey = (ev) => `${ev.id}|${ev.start}|${ev.time || ''}`;
+function maybeOpenInvite() {
+  if (!unlocked() || !$('invite').hidden || !$('gift').hidden) return;
+  const seen = load('kitty_seen_invites', true) || [];
+  const fresh = liveEvents().find((ev) => isInviteForMe(ev) && !seen.includes(inviteKey(ev)));
+  if (fresh) openInvite(fresh);
+}
+
+let inviting = null;
+function openInvite(ev) {
+  inviting = ev;
+  const seen = load('kitty_seen_invites', true) || [];
+  if (!seen.includes(inviteKey(ev))) save('kitty_seen_invites', [...seen, inviteKey(ev)].slice(-50));
+  $('envelope').classList.remove('open');
+  $('invite-card').hidden = true;
+  $('invite-tap').hidden = false;
+  $('invite').hidden = false;
+  $('invite-title').textContent = ev.title;
+  const n = daysBetween(todayStr(), ev.start);
+  $('invite-when').textContent = `${prettyDate(ev.start, { weekday: 'long', day: 'numeric', month: 'long' })}${ev.time ? ` at ${ev.time}` : ''}`
+    + (n > 1 ? ` · in ${n} days` : n === 1 ? ' · tomorrow' : n === 0 ? ' · tonight!' : '');
+  $('invite-notes').textContent = ev.notes || '';
+  $('invite-notes').hidden = !ev.notes;
+}
+function closeInvite() {
+  $('invite').hidden = true;
+  inviting = null;
+}
+$('envelope').onclick = () => {
+  if ($('envelope').classList.contains('open')) return;
+  $('envelope').classList.add('open');
+  $('invite-tap').hidden = true;
+  setTimeout(() => ($('invite-card').hidden = false), 1000);
+};
+$('invite-close').onclick = closeInvite;
+async function answerInvite(answer, btn) {
+  if (!inviting) return;
+  const ev = inviting;
+  await withButton(btn, '…', async () => {
+    await api(`/api/events/${ev.id}/respond`, { answer });
+    closeInvite();
+    toast(answer === 'yes' ? "It's a date! 💖 Your sweetie will be so happy" : 'Okay, maybe another time 🥺');
+    if (answer === 'yes') heartBurst($('heart-burst'));
+    await refresh();
+    renderCalendar();
+    renderDates();
+  });
+}
+$('invite-yes').onclick = (e) => answerInvite('yes', e.currentTarget);
+$('invite-no').onclick = (e) => answerInvite('no', e.currentTarget);
+$('invite-later').onclick = () => {
+  const ev = inviting;
+  closeInvite();
+  openEvent({ ev });
+  toast('Pick another day or time, then save to send it back 💌');
+};
+
 // ---------- Date nights ----------
 
 function renderDates() {
   if (!state) return;
-  const planned = upcoming(state.events || [], 10, (e) => e.type === 'date');
+  const planned = upcoming(state.events || [], 20, (e) => e.type === 'date');
   $('planned').hidden = !planned.length;
   $('planned-list').innerHTML = '';
   planned.forEach((x) => $('planned-list').append(eventRow(x.ev, x.date)));

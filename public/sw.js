@@ -1,6 +1,6 @@
 // Service worker: notifications, and an offline copy of the app so it opens instantly
 // even while the free server is waking up.
-const CACHE = 'kitty-v3';
+const CACHE = 'kitty-v4';
 const SHELL = ['/', '/style.css', '/app.js', '/manifest.webmanifest', '/icon-192.png', '/badge-96.png'];
 
 self.addEventListener('install', (event) => {

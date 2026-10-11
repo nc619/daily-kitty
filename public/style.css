@@ -792,3 +792,103 @@ textarea { resize: vertical; }
 .widget-card ol { margin: 6px 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
 .widget-card li { font-weight: 600; }
 .widget-card li .btn { margin-top: 6px; }
+
+/* Date invitations */
+.invites { display: flex; flex-direction: column; gap: 10px; }
+.invite-chip {
+  font: inherit;
+  border: none;
+  border-radius: 22px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  color: white;
+  background: linear-gradient(135deg, #9b7be8, #ec5f93);
+  box-shadow: 0 10px 28px rgba(155, 123, 232, .35);
+  animation: invite-pulse 2.4s ease-in-out infinite;
+}
+.invite-chip .env { font-size: 2.2rem; animation: wiggle 2.4s ease-in-out infinite; }
+.invite-chip b { display: block; font-family: 'Fredoka', sans-serif; font-size: 1.1rem; font-weight: 600; }
+.invite-chip span.small { font-size: .85rem; opacity: .9; }
+@keyframes invite-pulse { 50% { transform: scale(1.02); box-shadow: 0 14px 34px rgba(236, 95, 147, .45); } }
+
+.invite-backdrop { background: radial-gradient(ellipse at 50% 40%, rgba(155, 123, 232, .6), rgba(40, 20, 50, .85)); backdrop-filter: blur(6px); }
+.invite { position: relative; width: 100%; max-width: 380px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.invite-close { position: absolute; top: -50px; right: 0; color: white; }
+.invite-tap { color: white; font-weight: 800; margin: 0; animation: bob 2s ease-in-out infinite; }
+.envelope {
+  position: relative;
+  width: 260px;
+  height: 170px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  perspective: 800px;
+  animation: idle-wiggle 3.2s ease-in-out infinite;
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, .3));
+}
+.envelope .env-back { position: absolute; inset: 0; background: #f7a3c0; border-radius: 12px; }
+.envelope .letter {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 14px;
+  height: 140px;
+  background: #fffaf3;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18px;
+  font-size: 2rem;
+  transition: transform .8s cubic-bezier(.2, .8, .3, 1.1) .35s;
+}
+.envelope .env-front {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: linear-gradient(160deg, #ff9dbf, #f27aa5);
+  clip-path: polygon(0 0, 50% 58%, 100% 0, 100% 100%, 0 100%);
+}
+.envelope .flap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 100px;
+  background: linear-gradient(to bottom, #ec5f93, #f58bb3);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform-origin: top;
+  transition: transform .6s ease;
+  border-radius: 12px 12px 0 0;
+  z-index: 2;
+}
+.envelope .seal { position: absolute; left: 50%; top: 82px; transform: translate(-50%, -50%); font-size: 1.8rem; z-index: 3; transition: opacity .3s; }
+.envelope.open { animation: none; }
+.envelope.open .flap { transform: rotateX(180deg); z-index: 0; }
+.envelope.open .seal { opacity: 0; }
+.envelope.open .letter { transform: translateY(-90px); }
+.invite-card {
+  width: 100%;
+  background: #fffaf3;
+  border-radius: 26px;
+  padding: 22px 20px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .3);
+  animation: fade-up .6s ease;
+}
+.invite-card h2 { margin: 4px 0 6px; font-size: 1.7rem; color: var(--pink-deep); }
+.invite-when { margin: 0; font-weight: 800; font-size: 1.05rem; }
+.invite-notes { color: var(--muted); margin: 10px 0 0; white-space: pre-wrap; }
+.invite-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+.invite-actions .btn { width: 100%; flex: none; }
+
+.event .status { font-size: .72rem; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: var(--lav-soft); margin-left: 6px; white-space: nowrap; }
+.event .status.declined { background: #eee; color: var(--muted); }
+.event .status.waiting { background: #fff1c9; }
+.event .status.answer { background: var(--pink); color: white; }
+.event.declined b { text-decoration: line-through; opacity: .6; }
+.dot.pending { background: transparent; box-shadow: inset 0 0 0 1.5px var(--lav); }
