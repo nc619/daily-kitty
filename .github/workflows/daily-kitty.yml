@@ -1,0 +1,30 @@
+# Render's free plan sleeps when nobody uses it, so this wakes the server every morning
+# to deliver the daily kitty. The server only sends one per day, so extra runs are harmless.
+name: Daily kitty
+
+on:
+  schedule:
+    - cron: "5 8 * * *" # 09:05 London in summer
+    - cron: "5 9 * * *" # 09:05 London in winter
+    - cron: "30 10 * * *" # backup
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deliver today's kitty
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 120 -X POST "https://daily-kitty.onrender.com/api/daily"; then exit 0; fi
+            sleep 30
+          done
+          exit 1
+      # GitHub pauses scheduled workflows after 60 days without commits; this keeps it on.
+      - name: Keep schedule alive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/daily-kitty.yml/enable" || true

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffe3ec">
+  <title>Daily Kitty</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main id="home">
+    <header>
+      <h1 id="title">Daily Kitty <span class="paw">🐾</span></h1>
+      <p id="today"></p>
+    </header>
+
+    <div id="install" class="banner" hidden>
+      <span>Add Daily Kitty to your home screen 🏠</span>
+      <button id="install-btn" class="btn small">Install</button>
+    </div>
+    <div id="notif" class="banner" hidden>
+      <span>Get a ping when a new kitty arrives 🔔</span>
+      <button id="notif-btn" class="btn small">Turn on</button>
+    </div>
+
+    <section id="kitty" class="card">
+      <div id="kitty-frame" class="frame loading"><img id="kitty-img" alt="Today's kitty"></div>
+      <div class="kitty-text">
+        <p id="kitty-label" class="label">☀️ Today's kitty</p>
+        <p id="kitty-caption" class="caption" hidden></p>
+        <p id="kitty-time" class="time"></p>
+      </div>
+    </section>
+
+    <section id="note" class="card note" hidden>
+      <p class="label">💌 Latest love note</p>
+      <p id="note-text" class="note-text"></p>
+      <p id="note-time" class="time"></p>
+    </section>
+
+    <p id="waking" class="hint center" hidden>Waking up the kitty server… 😴</p>
+  </main>
+
+  <button id="fab" class="fab" hidden>Send something 💌</button>
+
+  <!-- Sweetie panel: only reachable after unlocking -->
+  <div id="panel" class="sheet" hidden>
+    <div class="sheet-head">
+      <button id="panel-close" class="icon" aria-label="Back">←</button>
+      <h2>Sweetie panel 💌</h2>
+      <button id="panel-lock" class="icon" aria-label="Hide sweetie mode" title="Hide sweetie mode">🔒</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="kitty-tab">Send a kitty 🐱</button>
+      <button class="tab" data-tab="note-tab">Send a note 💌</button>
+    </div>
+
+    <div id="kitty-tab" class="tab-body">
+      <div class="row">
+        <label class="btn outline">📷 My gallery<input id="gallery" type="file" accept="image/*" hidden></label>
+        <button id="more" class="btn outline">🎲 More kitties</button>
+      </div>
+      <div id="picked" hidden>
+        <img id="picked-img" alt="Selected picture">
+        <input id="caption" maxlength="150" placeholder="Add a little message (optional)">
+        <div class="row">
+          <button id="cancel-pick" class="btn ghost">Cancel</button>
+          <button id="send-kitty" class="btn">Send it 💕</button>
+        </div>
+      </div>
+      <p class="sub">Kitty pool, tap one to pick it</p>
+      <div id="pool" class="pool"></div>
+    </div>
+
+    <div id="note-tab" class="tab-body" hidden>
+      <p class="sub">Tap one or write your own</p>
+      <div id="presets" class="chips"></div>
+      <textarea id="note-input" rows="3" maxlength="200" placeholder="Your note"></textarea>
+      <button id="send-note" class="btn wide">Send note 💌</button>
+      <p class="hint">She gets it as a notification straight away, and it shows in her app for a day.</p>
+    </div>
+  </div>
+
+  <!-- Secret unlock (tap the title 7 times) -->
+  <div id="unlock" class="backdrop" hidden>
+    <form id="unlock-form" class="dialog">
+      <p class="dialog-title">🔐</p>
+      <input id="passphrase" type="password" autocomplete="off">
+      <p id="unlock-error" class="error" hidden>Nope 🙀</p>
+      <div class="row end">
+        <button type="button" id="unlock-cancel" class="btn ghost">Cancel</button>
+        <button type="submit" class="btn">OK</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

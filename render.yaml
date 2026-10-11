@@ -1,0 +1,17 @@
+# Render (https://render.com): New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: daily-kitty
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL # Neon connection string (postgresql://…), the same one as qui-de-nous works fine
+        sync: false
+      - key: TIME_ZONE
+        value: Europe/London
+      - key: DAILY_HOUR # hour the daily kitty arrives, in TIME_ZONE
+        value: "9"
