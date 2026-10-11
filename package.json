@@ -10,6 +10,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "web-push": "^3.6.7"
   },
   "optionalDependencies": {

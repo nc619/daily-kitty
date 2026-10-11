@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const TIME_ZONE = process.env.TIME_ZONE || 'Europe/London';
 const DAILY_HOUR = Number(process.env.DAILY_HOUR || 9);
-const MEDIA_LIMIT = Number(process.env.MEDIA_LIMIT_MB || 900) * 1024 * 1024; // Neon free plan: ~1 GB
+const MEDIA_LIMIT = media.limit; // 9.5 GB on R2 (free up to 10 GB), 900 MB in the database
 // If a kitty was sent by hand this recently, the daily one is skipped so it stays up.
 const KEEP_HAND_SENT_HOURS = 6;
 
@@ -23,7 +23,7 @@ const DAILY_BODIES = [
   'Your daily dose of cute has arrived 🥰',
 ];
 const EVENT_TYPES = { trip: '✈️', date: '🌙', special: '💖', other: '📌' };
-const SIZE_LIMITS = { image: 20 * 1024 * 1024, video: 600 * 1024 * 1024, audio: 40 * 1024 * 1024 };
+const SIZE_LIMITS = { image: 20 * 1024 * 1024, video: 1500 * 1024 * 1024, audio: 40 * 1024 * 1024 };
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -568,7 +568,8 @@ async function saveEvent(me, body) {
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, re: new RegExp(`^${pattern}$`), handler });
 
-route('GET', '/api/health', async () => ({ ok: true, storage: store.label }));
+let mediaStatus = 'checking';
+route('GET', '/api/health', async () => ({ ok: true, storage: store.label, media: media.backend, mediaStatus }));
 
 route('GET', '/api/state', async (req) => {
   // Opening the app after the daily hour also delivers the daily kitty if nothing else did.
@@ -802,6 +803,11 @@ server.requestTimeout = 0; // big uploads on slow connections
 load()
   .then(() => {
     push.init();
+    media.selfTest().then((status) => {
+      mediaStatus = status;
+      console.log(`Media storage: ${media.backend} (${status})`);
+      if (status === 'ok') media.migrateToR2().catch((e) => console.error('R2 migration failed:', e));
+    });
     server.listen(PORT, () => console.log(`Daily Kitty on http://localhost:${PORT} (storage: ${store.label})`));
     setInterval(() => maybeDaily().catch((e) => console.error('Daily kitty failed:', e)), 5 * 60_000);
     maybeDaily().catch((e) => console.error('Daily kitty failed:', e));
