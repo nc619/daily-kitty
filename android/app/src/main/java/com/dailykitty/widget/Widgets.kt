@@ -141,27 +141,36 @@ object Views {
         setOnClickPendingIntent(R.id.caption, pi)
     }
 
-    fun kitty(ctx: Context): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_kitty).apply {
+    /** A cheap soft blur: shrink the photo to a few pixels and let Android smooth it back up. */
+    private fun blurred(src: Bitmap): Bitmap {
+        val w = 16
+        val h = maxOf(1, w * src.height / maxOf(1, src.width))
+        val tiny = Bitmap.createScaledBitmap(src, w, h, true)
+        return Bitmap.createScaledBitmap(tiny, w * 10, h * 10, true)
+    }
+
+    fun kitty(ctx: Context, compact: Boolean): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_kitty).apply {
         val bitmap = Cache.bitmap(ctx, "kitty")
         val caption = Cache.caption(ctx, "kitty")
         if (bitmap != null) {
             setImageViewBitmap(R.id.image, bitmap)
+            setImageViewBitmap(R.id.bg, blurred(bitmap))
             setViewVisibility(R.id.placeholder, View.GONE)
         } else {
             setViewVisibility(R.id.placeholder, View.VISIBLE)
             setTextViewText(R.id.placeholder, if (Auth.isConnected(ctx)) "🐾 Kitty on the way…" else "🐾 Open Kitty Widgets to connect")
         }
         setTextViewText(R.id.caption, caption)
-        setViewVisibility(R.id.caption, if (caption.isNotBlank()) View.VISIBLE else View.GONE)
+        setViewVisibility(R.id.caption, if (caption.isNotBlank() && !compact) View.VISIBLE else View.GONE)
         clickable(open(ctx, ""))
     }
 
-    fun doodle(ctx: Context): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_doodle).apply {
+    fun doodle(ctx: Context, compact: Boolean): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_doodle).apply {
         val bitmap = Cache.bitmap(ctx, "doodle")
         if (bitmap != null) {
             setImageViewBitmap(R.id.image, bitmap)
             setViewVisibility(R.id.placeholder, View.GONE)
-            setViewVisibility(R.id.caption, View.VISIBLE)
+            setViewVisibility(R.id.caption, if (compact) View.GONE else View.VISIBLE)
         } else {
             setViewVisibility(R.id.placeholder, View.VISIBLE)
             setViewVisibility(R.id.caption, View.GONE)
@@ -173,10 +182,26 @@ object Views {
         clickable(open(ctx, "#draw"))
     }
 
+    /** Tiny widgets (about one cell) hide the caption and the "Draw back" bubble. */
+    fun isCompact(manager: AppWidgetManager, id: Int): Boolean {
+        val options = manager.getAppWidgetOptions(id)
+        val w = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 110)
+        val h = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110)
+        return w in 1..99 || h in 1..99
+    }
+
+    fun update(ctx: Context, manager: AppWidgetManager, id: Int, isDoodle: Boolean) {
+        val compact = isCompact(manager, id)
+        manager.updateAppWidget(id, if (isDoodle) doodle(ctx, compact) else kitty(ctx, compact))
+    }
+
+    private val kittyProviders = listOf(KittyWidget::class.java, KittyWidgetSmall::class.java, KittyWidgetWide::class.java, KittyWidgetLarge::class.java)
+    private val doodleProviders = listOf(DoodleWidget::class.java, DoodleWidgetMedium::class.java, DoodleWidgetLarge::class.java)
+
     fun redrawAll(ctx: Context) {
         val manager = AppWidgetManager.getInstance(ctx)
-        manager.getAppWidgetIds(ComponentName(ctx, KittyWidget::class.java)).forEach { manager.updateAppWidget(it, kitty(ctx)) }
-        manager.getAppWidgetIds(ComponentName(ctx, DoodleWidget::class.java)).forEach { manager.updateAppWidget(it, doodle(ctx)) }
+        kittyProviders.forEach { cls -> manager.getAppWidgetIds(ComponentName(ctx, cls)).forEach { update(ctx, manager, it, false) } }
+        doodleProviders.forEach { cls -> manager.getAppWidgetIds(ComponentName(ctx, cls)).forEach { update(ctx, manager, it, true) } }
     }
 }
 
@@ -271,18 +296,28 @@ class OpenActivity : Activity() {
     }
 }
 
-class KittyWidget : AppWidgetProvider() {
+/** Same widget, several default sizes in the widget picker (each can still be resized). */
+open class KittyWidget : AppWidgetProvider() {
+    open val isDoodle = false
+
     override fun onUpdate(ctx: Context, manager: AppWidgetManager, ids: IntArray) {
-        ids.forEach { manager.updateAppWidget(it, Views.kitty(ctx)) }
+        ids.forEach { Views.update(ctx, manager, it, isDoodle) }
         RefreshWorker.schedule(ctx)
         RefreshWorker.runNow(ctx)
+    }
+
+    override fun onAppWidgetOptionsChanged(ctx: Context, manager: AppWidgetManager, id: Int, newOptions: Bundle) {
+        Views.update(ctx, manager, id, isDoodle) // resized: show or hide the caption
     }
 }
 
-class DoodleWidget : AppWidgetProvider() {
-    override fun onUpdate(ctx: Context, manager: AppWidgetManager, ids: IntArray) {
-        ids.forEach { manager.updateAppWidget(it, Views.doodle(ctx)) }
-        RefreshWorker.schedule(ctx)
-        RefreshWorker.runNow(ctx)
-    }
+class KittyWidgetSmall : KittyWidget()
+class KittyWidgetWide : KittyWidget()
+class KittyWidgetLarge : KittyWidget()
+
+open class DoodleWidget : KittyWidget() {
+    override val isDoodle = true
 }
+
+class DoodleWidgetMedium : DoodleWidget()
+class DoodleWidgetLarge : DoodleWidget()
