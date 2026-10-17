@@ -27,24 +27,35 @@ const DATE_IDEAS = [
     ['🕵️', 'Codenames online', 'Free at codenames.game; play as a team against the clock.'],
     ['🗺️', 'GeoGuessr duel', 'Guess where in the world you are; loser plans the next date.'],
     ['❓', 'Quiz about us', 'Write 10 questions about yourselves and quiz each other.'],
+    ['🎮', 'Co-op game night', 'Stardew Valley, Minecraft or It Takes Two (the second player plays free).'],
+    ['🧠', 'Trivia night', 'Kahoot, Jackbox or a pub-quiz video. Loser owes the winner a treat.'],
   ] },
   { group: 'Cook & eat 🍝', items: [
     ['👩‍🍳', 'Same recipe, two kitchens', 'Cook the same dish on video call, then eat "together".'],
     ['🛵', 'Surprise delivery', "Order each other's dinner without saying what it is."],
     ['🥞', 'Breakfast date', 'Pancakes and coffee on call before the day starts.'],
+    ['🧁', 'Bake-off', 'Bake the same dessert at the same time, then judge each other\'s creation.'],
   ] },
   { group: 'Cozy & deep 💞', items: [
     ['💬', '36 questions', 'The famous "36 questions to fall in love". Take your time.'],
     ['📖', 'Reading date', 'Read the same book (or the same chapter) side by side, then talk about it.'],
     ['😴', 'Fall asleep on call', 'The classic. Stay on until one of you is snoring.'],
+    ['🧖', 'Spa night', 'Face masks, candles, comfy clothes and a long slow chat.'],
   ] },
   { group: 'Creative ✨', items: [
     ['🎨', 'Paint the same thing', 'Same subject, 30 minutes, then reveal. No judging (a bit of judging).'],
     ['📸', 'Photo challenge', 'Same list of things to photograph in your cities, compare at the end.'],
     ['🧶', 'Make something', 'Both try a little craft kit or origami tutorial at the same time.'],
   ] },
+  { group: 'Learn & grow 🌱', items: [
+    ['💃', 'Learn something together', 'A dance, a few words of a language or a 30-minute YouTube class.'],
+    ['🧘', 'Workout date', 'Do the same yoga or workout video at the same time.'],
+    ['🌱', 'Grow something', 'Plant the same seeds and compare how they grow every week.'],
+  ] },
   { group: 'Dreaming together 🏠', items: [
+    ['🧳', 'Plan our next visit', 'Build the real itinerary for the next time you see each other.'],
     ['🏡', 'House tours', 'Browse dream houses or holiday rentals together.'],
+    ['🛍️', 'Shopping date', 'Pick an outfit or a little gift for each other, on a budget.'],
   ] },
 ];
 
@@ -342,6 +353,7 @@ function renderHome() {
       frame.classList.add('loading');
       img.onload = img.onerror = () => frame.classList.remove('loading');
       img.src = kitty.imageUrl;
+      $('kitty-bg').src = kitty.imageUrl;
     }
     const fromMe = kitty.from === me();
     $('kitty-label').textContent = kitty.from === 'daily' ? "☀️ Today's kitty" : fromMe ? '💌 You sent this one' : '💌 A special one from your sweetie';

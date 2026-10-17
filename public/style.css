@@ -118,9 +118,33 @@ h1.tapped .paw { transform: rotate(-18deg) scale(1.2); }
   position: relative;
   user-select: none;
 }
-.frame img { width: 100%; height: max(360px, min(820px, calc(100svh - 250px))); object-fit: cover; display: block; transition: opacity .4s; cursor: zoom-in; }
+/* The whole photo, as big as fits; a soft blurred copy fills the space beside tall photos. */
+.frame img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: auto;
+  max-height: max(360px, min(820px, calc(100svh - 250px)));
+  object-fit: contain;
+  display: block;
+  transition: opacity .4s;
+  cursor: zoom-in;
+}
+.frame img.kitty-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  filter: blur(22px) saturate(1.15);
+  transform: scale(1.2);
+  opacity: .75;
+  pointer-events: none;
+}
 .frame.loading, .frame.empty { min-height: 300px; }
 .frame.loading img { opacity: 0; position: absolute; }
+.frame.empty img.kitty-bg { display: none; }
 .frame.loading::after { content: '🐾'; position: absolute; font-size: 2.4rem; animation: bob 1.2s ease-in-out infinite; }
 .frame.empty::after { content: 'Your first kitty is on its way 🐾'; position: absolute; padding: 0 20px; text-align: center; }
 @keyframes bob { 50% { transform: translateY(-8px); } }
