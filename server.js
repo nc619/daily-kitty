@@ -88,6 +88,17 @@ function localDay(now = Date.now(), tz = TIME_ZONE) {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
+/** Epoch ms of the next DAILY_HOUR:10 in TIME_ZONE (the widget app refreshes then). */
+function nextDailyAt(now = Date.now()) {
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  let t = Math.ceil(now / 300000) * 300000;
+  for (let i = 0; i < 400; i++, t += 300000) {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+    if (Number(p.hour) === DAILY_HOUR && Number(p.minute) >= 10 && Number(p.minute) < 15) return t;
+  }
+  return now + 864e5;
+}
+
 function prettyDate(iso) {
   return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
@@ -653,6 +664,37 @@ route('POST', '/api/settings', async (req) => {
   return state(req);
 });
 
+route('POST', '/api/reset-her', async (req) => {
+  requireHim(req);
+  const db = store.db;
+  const removedMedia = new Set();
+  for (const p of db.posts) {
+    if (p.from === 'her' && p.mediaId) removedMedia.add(p.mediaId);
+  }
+  db.posts = db.posts.filter((p) => p.from !== 'her' && p.kind !== 'gift');
+  for (const p of db.posts) if (p.hearts) delete p.hearts.her;
+  db.notes = db.notes.filter((n) => n.from !== 'her');
+  db.events = db.events.filter((e) => e.by !== 'her' && e.requestedBy !== 'her');
+  for (const e of db.events) {
+    if (e.type === 'date' && e.status !== 'pending') Object.assign(e, { status: 'pending', requestedBy: 'him', respondedAt: null });
+  }
+  for (const g of db.gifts) {
+    if (g.status !== 'draft') Object.assign(g, { status: 'draft', sentAt: null, openedAt: null });
+  }
+  if (db.current && db.current.from === 'her') {
+    const prev = db.posts.find((p) => p.kind === 'kitty' || p.kind === 'photo');
+    db.current = null;
+    if (prev) setCurrent(prev);
+  }
+  db.subs = db.subs.filter((s) => s.role !== 'her');
+  delete db.tz.her;
+  db.unlocked = false;
+  db.herKey = crypto.randomBytes(12).toString('hex');
+  persist();
+  for (const id of removedMedia) await media.remove(id).catch(() => {});
+  return state(req);
+});
+
 route('GET', '/api/pool', async (req) => {
   requireUnlocked(req);
   return { items: await cats.pool(12), stats: cats.stats() };
@@ -740,6 +782,7 @@ route('DELETE', '/api/gifts/([a-f0-9]+)', async (req, [id]) => {
 // For the Android home-screen widgets: today's kitty and the latest drawing from the other one.
 route('GET', '/api/widget', async (req) => {
   const me = requireAny(req);
+  await Promise.race([maybeDaily().catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const base = `${req.headers['x-forwarded-proto'] || 'http'}://${host}`;
   const abs = (u) => (u && u.startsWith('/') ? base + u : u);
@@ -749,6 +792,7 @@ route('GET', '/api/widget', async (req) => {
   return {
     kitty: cur ? { url: abs(cur.imageUrl), caption: cur.caption || '', at: cur.sentAt } : null,
     doodle: showDoodle && doodle ? { url: abs(doodle.url), caption: doodle.caption || '', at: doodle.at } : null,
+    nextDaily: nextDailyAt(),
   };
 });
 

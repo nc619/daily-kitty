@@ -1,14 +1,18 @@
 package com.dailykitty.widget
 
+import android.app.Activity
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
 import androidx.work.Constraints
@@ -42,6 +46,16 @@ object Auth {
         prefs(ctx).getString("key", null)?.let { conn.setRequestProperty("x-kitty-key", it) }
         prefs(ctx).getString("token", null)?.let { conn.setRequestProperty("x-sweetie-token", it) }
     }
+}
+
+/** Last refresh result, shown in the Kitty Widgets app to help when something looks stuck. */
+object Status {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("status", Context.MODE_PRIVATE)
+    fun ok(ctx: Context) = prefs(ctx).edit().putLong("okAt", System.currentTimeMillis()).remove("error").apply()
+    fun error(ctx: Context, message: String) =
+        prefs(ctx).edit().putString("error", message).putLong("errorAt", System.currentTimeMillis()).apply()
+    fun lastOk(ctx: Context) = prefs(ctx).getLong("okAt", 0L)
+    fun lastError(ctx: Context): String? = prefs(ctx).getString("error", null)
 }
 
 /** Last pictures shown, kept on disk so widgets redraw instantly. */
@@ -78,7 +92,8 @@ object Net {
         conn.readTimeout = 90_000
         Auth.apply(ctx, conn)
         try {
-            if (conn.responseCode != 200) throw RuntimeException("HTTP ${conn.responseCode}")
+            if (conn.responseCode == 403) throw RuntimeException("Not connected any more. Tap \"Connect the widgets\" in Daily Kitty again.")
+            if (conn.responseCode != 200) throw RuntimeException("Server answered HTTP ${conn.responseCode}")
             return JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
         } finally {
             conn.disconnect()
@@ -90,9 +105,10 @@ object Net {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 60_000
         conn.readTimeout = 90_000
-        conn.setRequestProperty("User-Agent", "KittyWidgets/1.0")
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", "KittyWidgets/2.0")
         val bytes = try {
-            if (conn.responseCode != 200) return null
+            if (conn.responseCode != 200) throw RuntimeException("Picture download failed (HTTP ${conn.responseCode})")
             conn.inputStream.use { it.readBytes() }
         } finally {
             conn.disconnect()
@@ -112,8 +128,17 @@ object Net {
 
 object Views {
     private fun open(ctx: Context, hash: String): PendingIntent {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("$BASE_URL/$hash")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = Intent(ctx, OpenActivity::class.java)
+            .putExtra("hash", hash)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return PendingIntent.getActivity(ctx, hash.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    private fun RemoteViews.clickable(pi: PendingIntent) {
+        setOnClickPendingIntent(R.id.root, pi)
+        setOnClickPendingIntent(R.id.image, pi)
+        setOnClickPendingIntent(R.id.placeholder, pi)
+        setOnClickPendingIntent(R.id.caption, pi)
     }
 
     fun kitty(ctx: Context): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_kitty).apply {
@@ -123,11 +148,12 @@ object Views {
             setImageViewBitmap(R.id.image, bitmap)
             setViewVisibility(R.id.placeholder, View.GONE)
         } else {
+            setViewVisibility(R.id.placeholder, View.VISIBLE)
             setTextViewText(R.id.placeholder, if (Auth.isConnected(ctx)) "🐾 Kitty on the way…" else "🐾 Open Kitty Widgets to connect")
         }
         setTextViewText(R.id.caption, caption)
         setViewVisibility(R.id.caption, if (caption.isNotBlank()) View.VISIBLE else View.GONE)
-        setOnClickPendingIntent(R.id.root, open(ctx, ""))
+        clickable(open(ctx, ""))
     }
 
     fun doodle(ctx: Context): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_doodle).apply {
@@ -135,10 +161,16 @@ object Views {
         if (bitmap != null) {
             setImageViewBitmap(R.id.image, bitmap)
             setViewVisibility(R.id.placeholder, View.GONE)
+            setViewVisibility(R.id.caption, View.VISIBLE)
         } else {
-            setTextViewText(R.id.placeholder, if (Auth.isConnected(ctx)) "🎨 No drawing yet" else "🎨 Open Kitty Widgets to connect")
+            setViewVisibility(R.id.placeholder, View.VISIBLE)
+            setViewVisibility(R.id.caption, View.GONE)
+            setTextViewText(
+                R.id.placeholder,
+                if (Auth.isConnected(ctx)) "🎨 No drawing from your sweetie yet\nTap to draw one ✏️" else "🎨 Open Kitty Widgets to connect",
+            )
         }
-        setOnClickPendingIntent(R.id.root, open(ctx, "#draw"))
+        clickable(open(ctx, "#draw"))
     }
 
     fun redrawAll(ctx: Context) {
@@ -157,8 +189,11 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params
             update(ctx, "kitty", data.optJSONObject("kitty"))
             update(ctx, "doodle", data.optJSONObject("doodle"))
             Views.redrawAll(ctx)
+            data.optLong("nextDaily").takeIf { it > 0 }?.let { DailyAlarm.set(ctx, it) }
+            Status.ok(ctx)
             Result.success()
         } catch (e: Exception) {
+            Status.error(ctx, e.message ?: e.javaClass.simpleName)
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
     }
@@ -175,7 +210,7 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params
             if (caption != Cache.caption(ctx, name)) Cache.bitmap(ctx, name)?.let { Cache.save(ctx, name, url, caption, it) }
             return
         }
-        val bitmap = Net.bitmap(url) ?: return
+        val bitmap = Net.bitmap(url) ?: throw RuntimeException("Could not read the $name picture")
         Cache.save(ctx, name, url, caption, bitmap)
     }
 
@@ -190,8 +225,49 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params
         /** Every 15 minutes (the shortest Android allows). */
         fun schedule(ctx: Context) {
             val request = PeriodicWorkRequestBuilder<RefreshWorker>(15, TimeUnit.MINUTES).setConstraints(network).build()
-            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("refresh", ExistingPeriodicWorkPolicy.KEEP, request)
+            WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("refresh", ExistingPeriodicWorkPolicy.UPDATE, request)
         }
+    }
+}
+
+/** Wakes the app a few minutes after the daily kitty is delivered, even in deep sleep. */
+object DailyAlarm {
+    fun set(ctx: Context, atMillis: Long) {
+        val alarms = ctx.getSystemService(AlarmManager::class.java) ?: return
+        val pi = PendingIntent.getBroadcast(
+            ctx, 1, Intent(ctx, AlarmReceiver::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pi)
+    }
+}
+
+class AlarmReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        RefreshWorker.runNow(ctx)
+        DailyAlarm.set(ctx, System.currentTimeMillis() + 24 * 60 * 60 * 1000L) // refined after the refresh
+    }
+}
+
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        if (!Auth.isConnected(ctx)) return
+        RefreshWorker.schedule(ctx)
+        RefreshWorker.runNow(ctx)
+    }
+}
+
+/** Invisible: refreshes the widgets, then opens Daily Kitty (on the drawing page for the drawing widget). */
+class OpenActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        RefreshWorker.runNow(this)
+        val hash = intent.getStringExtra("hash").orEmpty()
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$BASE_URL/$hash")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+        finish()
     }
 }
 

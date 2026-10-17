@@ -92,7 +92,8 @@ h1.tapped .paw { transform: rotate(-18deg) scale(1.2); }
   padding: 18px;
   backdrop-filter: blur(6px);
 }
-.kitty-card { padding: 0; overflow: hidden; }
+.kitty-card { padding: 0; overflow: hidden; margin: 0 -6px; }
+.kitty-card .frame { margin: 8px; }
 .eyebrow { margin: 0 0 8px; font-weight: 800; font-size: .85rem; color: var(--muted); text-transform: none; }
 .label { margin: 0; font-weight: 800; font-size: 1.08rem; }
 .caption { margin: 6px 0 0; font-size: 1.15rem; font-style: italic; }
@@ -117,7 +118,7 @@ h1.tapped .paw { transform: rotate(-18deg) scale(1.2); }
   position: relative;
   user-select: none;
 }
-.frame img { width: 100%; max-height: 70vh; object-fit: cover; display: block; transition: opacity .4s; }
+.frame img { width: 100%; height: max(360px, min(820px, calc(100svh - 250px))); object-fit: cover; display: block; transition: opacity .4s; cursor: zoom-in; }
 .frame.loading, .frame.empty { min-height: 300px; }
 .frame.loading img { opacity: 0; position: absolute; }
 .frame.loading::after { content: '🐾'; position: absolute; font-size: 2.4rem; animation: bob 1.2s ease-in-out infinite; }
@@ -892,3 +893,22 @@ textarea { resize: vertical; }
 .event .status.answer { background: var(--pink); color: white; }
 .event.declined b { text-decoration: line-through; opacity: .6; }
 .dot.pending { background: transparent; box-shadow: inset 0 0 0 1.5px var(--lav); }
+
+/* Other date ideas (folded) */
+.other-ideas { margin-top: 18px; }
+.other-ideas summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: 'Fredoka', sans-serif;
+  font-weight: 600;
+  font-size: 1.05rem;
+  padding: 14px 18px;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+.other-ideas summary::-webkit-details-marker { display: none; }
+.other-ideas summary::after { content: ' ▾'; color: var(--muted); }
+.other-ideas[open] summary::after { content: ' ▴'; }
+.other-ideas .ideas { margin-top: 12px; }
+.reset-card { border: 2px dashed var(--line); }

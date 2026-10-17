@@ -11,8 +11,26 @@ android {
         applicationId = "com.dailykitty.widget"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
+    }
+
+    // A fixed key so new versions install over old ones. This app only shows pictures,
+    // so the key living in the repo is an acceptable trade-off for a two-person app.
+    signingConfigs {
+        create("kitty") {
+            storeFile = file("../kitty-widgets.p12")
+            storeType = "pkcs12"
+            storePassword = "kittywidgets"
+            keyAlias = "kittywidgets"
+            keyPassword = "kittywidgets"
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("kitty")
+        }
     }
 
     compileOptions {

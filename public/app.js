@@ -18,44 +18,49 @@ const NOTE_PRESETS = [
 const EVENT_EMOJI = { trip: '✈️', date: '🌙', special: '💖', other: '📌' };
 
 const DATE_IDEAS = [
-  { group: 'Watch together 🍿', items: [
+  { group: 'Watch & listen 🍿', items: [
     ['🎬', 'Movie night', 'Press play at the same time (or use Teleparty) with matching snacks.'],
-    ['📺', 'Series marathon', 'Start a new show together and only watch it together.'],
-    ['🌍', 'Travel docs night', 'Watch a documentary about a place you want to visit together.'],
-    ['😂', 'Childhood cartoons', "Show each other the cartoons you grew up with."],
+    ['🎧', 'Music & Chill', 'Start a Spotify Jam or a shared playlist, get cozy and just hang out together.'],
   ] },
   { group: 'Play together 🎮', items: [
-    ['🗺️', 'GeoGuessr duel', 'Guess where in the world you are; loser plans the next date.'],
     ['✏️', 'Gartic Phone / skribbl.io', 'Silly drawing games that end in tears of laughter.'],
     ['🕵️', 'Codenames online', 'Free at codenames.game; play as a team against the clock.'],
-    ['🧩', 'Online jigsaw', 'Solve a jigsaw together on a shared puzzle site.'],
+    ['🗺️', 'GeoGuessr duel', 'Guess where in the world you are; loser plans the next date.'],
     ['❓', 'Quiz about us', 'Write 10 questions about yourselves and quiz each other.'],
   ] },
   { group: 'Cook & eat 🍝', items: [
     ['👩‍🍳', 'Same recipe, two kitchens', 'Cook the same dish on video call, then eat "together".'],
     ['🛵', 'Surprise delivery', "Order each other's dinner without saying what it is."],
-    ['🍷', 'Tasting night', 'Pick the same wine, chocolate or cheese and rate it.'],
     ['🥞', 'Breakfast date', 'Pancakes and coffee on call before the day starts.'],
   ] },
   { group: 'Cozy & deep 💞', items: [
     ['💬', '36 questions', 'The famous "36 questions to fall in love". Take your time.'],
-    ['📖', 'Book club for two', 'Read the same chapter, then talk about it.'],
-    ['✉️', 'Letter night', 'Write each other real letters and post them the same evening.'],
-    ['🔮', 'Future planning', 'Dream up your next trip, your future home, your bucket list.'],
+    ['📖', 'Reading date', 'Read the same book (or the same chapter) side by side, then talk about it.'],
     ['😴', 'Fall asleep on call', 'The classic. Stay on until one of you is snoring.'],
   ] },
   { group: 'Creative ✨', items: [
-    ['🎨', 'Paint the same thing', "Same subject, 30 minutes, then reveal. No judging (a bit of judging)."],
-    ['🎶', 'Playlist swap', 'Build a shared playlist of songs that remind you of each other.'],
+    ['🎨', 'Paint the same thing', 'Same subject, 30 minutes, then reveal. No judging (a bit of judging).'],
     ['📸', 'Photo challenge', 'Same list of things to photograph in your cities, compare at the end.'],
     ['🧶', 'Make something', 'Both try a little craft kit or origami tutorial at the same time.'],
   ] },
-  { group: 'Little adventures 🌙', items: [
-    ['🌌', 'Stargazing call', 'Go outside, look at the same moon, talk about everything.'],
-    ['🏛️', 'Virtual museum', 'Google Arts & Culture tours of museums around the world.'],
-    ['🚶', 'Walking date', 'Go for a walk at the same time and show each other your view.'],
-    ['🏠', 'House tours', 'Browse dream houses or holiday rentals together.'],
+  { group: 'Dreaming together 🏠', items: [
+    ['🏡', 'House tours', 'Browse dream houses or holiday rentals together.'],
   ] },
+];
+
+// Shown in the folded "Other ideas" section at the end.
+const OTHER_IDEAS = [
+  ['📺', 'Series marathon', 'Start a new show together and only watch it together.'],
+  ['🌍', 'Travel docs night', 'Watch a documentary about a place you want to visit together.'],
+  ['😂', 'Childhood cartoons', 'Show each other the cartoons you grew up with.'],
+  ['🧩', 'Online jigsaw', 'Solve a jigsaw together on a shared puzzle site.'],
+  ['🍷', 'Tasting night', 'Pick the same wine, chocolate or cheese and rate it.'],
+  ['✉️', 'Letter night', 'Write each other real letters and post them the same evening.'],
+  ['🔮', 'Future planning', 'Dream up your next trip, your future home, your bucket list.'],
+  ['🎶', 'Playlist swap', 'Build a shared playlist of songs that remind you of each other.'],
+  ['🌌', 'Stargazing call', 'Go outside, look at the same moon, talk about everything.'],
+  ['🏛️', 'Virtual museum', 'Google Arts & Culture tours of museums around the world.'],
+  ['🚶', 'Walking date', 'Go for a walk at the same time and show each other your view.'],
 ];
 
 const COLORS = ['#4b3a47', '#ec5f93', '#f7a541', '#f5d142', '#58c49a', '#5aa9e6', '#9b7be8', '#ffffff'];
@@ -419,13 +424,22 @@ function renderClocks() {
 
 // Double-tap the kitty to send a heart.
 let lastKittyTap = 0;
+let kittyTapTimer;
 $('kitty-frame').addEventListener('click', (e) => {
   const now = Date.now();
+  clearTimeout(kittyTapTimer);
   if (now - lastKittyTap < 350 && state && state.current && state.current.postId) {
     heartBurst($('heart-burst'), e);
     api('/api/heart', { postId: state.current.postId }).catch(() => {});
     lastKittyTap = 0;
-  } else lastKittyTap = now;
+  } else {
+    lastKittyTap = now;
+    // A single tap shows the whole photo.
+    kittyTapTimer = setTimeout(() => {
+      const k = state && state.current;
+      if (k) openViewer({ id: k.postId, url: k.imageUrl, mime: 'image/jpeg', caption: k.caption, from: k.from, at: k.sentAt, credit: k.credit, kind: 'kitty', download: k.postId ? `/dl/${k.postId}` : k.imageUrl });
+    }, 360);
+  }
 });
 
 function heartBurst(container, e) {
@@ -469,6 +483,7 @@ function widgetSteps(withHide) {
       el('li', {}, 'Get the little widget app', el('br'), el('a', { class: 'btn small outline', href: WIDGET_APK }, '⬇️ Download Kitty Widgets')),
       el('li', {}, 'Open the download and install it (allow Chrome to install apps if asked)'),
       el('li', {}, 'Link it to you', el('br'), el('a', { class: 'btn small', href: connect }, '🔗 Connect the widgets')),
+      el('li', {}, 'In Kitty Widgets, tap "Allow background updates" so they refresh every day'),
       el('li', {}, 'Long-press your home screen → Widgets → Kitty Widgets')),
     withHide ? el('button', { class: 'btn small ghost', onclick: () => { save('kitty_widget_hidden', '1'); $('widget-card').hidden = true; } }, 'Hide this') : null,
   ];
@@ -898,6 +913,16 @@ $('new-link').onclick = async () => {
   if (!confirm('Make a new link? The old one stops working (her phone too, until she opens the new link).')) return;
   state = await api('/api/settings', { newHerLink: true });
   loadSettings();
+};
+$('reset-her').onclick = async (e) => {
+  if (!confirm('Fresh start for her?\n\n• Her app goes back to "just kitties"\n• Her private link changes (the old one stops working)\n• Everything sent from her side is deleted (photos, notes, drawings, plans)\n• Your gifts go back to "not sent yet"\n\nYour own photos, notes and plans stay.')) return;
+  await withButton(e.currentTarget, 'Resetting…', async () => {
+    state = await api('/api/reset-her', {});
+    save('kitty_state', state);
+    loadSettings();
+    renderAll();
+    toast('Fresh start done 🎂 Send her the new link on the big day');
+  });
 };
 $('her-unlocked').onchange = async (e) => {
   state = await api('/api/settings', { herUnlocked: e.target.checked });
@@ -1419,17 +1444,17 @@ function renderDates() {
 
   const box = $('ideas');
   if (box.children.length) return;
+  const card = ([emoji, title, desc]) => el('div', { class: 'idea', 'data-idea': title },
+    el('span', { class: 'e' }, emoji),
+    el('b', {}, title),
+    el('p', {}, desc),
+    el('button', { onclick: () => openEvent({ type: 'date', title: `${title} ${emoji}`, notes: desc, date: nextFriday() }) }, '🗓️ Plan it'));
   for (const g of DATE_IDEAS) {
-    const grid = el('div', { class: 'ideas' });
-    for (const [emoji, title, desc] of g.items) {
-      grid.append(el('div', { class: 'idea', 'data-idea': title },
-        el('span', { class: 'e' }, emoji),
-        el('b', {}, title),
-        el('p', {}, desc),
-        el('button', { onclick: () => openEvent({ type: 'date', title: `${title} ${emoji}`, notes: desc, date: nextFriday() }) }, '🗓️ Plan it')));
-    }
-    box.append(el('section', { class: 'idea-group' }, el('h3', {}, g.group), grid));
+    box.append(el('section', { class: 'idea-group' }, el('h3', {}, g.group), el('div', { class: 'ideas' }, g.items.map(card))));
   }
+  box.append(el('details', { class: 'other-ideas' },
+    el('summary', {}, `💡 Other ideas (${OTHER_IDEAS.length})`),
+    el('div', { class: 'ideas' }, OTHER_IDEAS.map(card))));
 }
 
 function nextFriday() {
@@ -1439,7 +1464,7 @@ function nextFriday() {
 }
 
 $('surprise').onclick = () => {
-  const all = [...document.querySelectorAll('.idea')];
+  const all = [...document.querySelectorAll('.idea-group .idea')];
   const pickEl = all[Math.floor(Math.random() * all.length)];
   pickEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   pickEl.classList.remove('flash');
