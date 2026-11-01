@@ -37,8 +37,7 @@ npm start   # http://localhost:3000
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | Neon Postgres. Without it, data goes to `data/`. Media is stored in 1 MB chunks (`kitty_media_chunks`). |
-| `DAILY_HOUR` | Hour the daily kitty and the calendar digest arrive, in each one's own time zone (the one their phone reports; default `9`). |
-| `TIME_ZONE` / `HER_TIME_ZONE` | Time zones used until a phone has reported one (default `Europe/London` / `Europe/Moscow`). |
+| `TIME_ZONE` / `HER_TIME_ZONE` / `DAILY_HOUR` | The daily kitty and the calendar digest arrive at `DAILY_HOUR` in his and in her time zone (default `Europe/London` / `Europe/Moscow`, `9`). |
 | `KEEP_AWAKE` | `off` stops the server from pinging itself every 10 minutes on Render to stay awake. |
 | `MEDIA_LIMIT_MB` | Storage cap for uploads (default 900, for Neon's 1 GB free plan). |
 | `SENDER_PASSPHRASE` | Optional. Fixes your passphrase. |

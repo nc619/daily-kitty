@@ -9,8 +9,8 @@ const cats = require('./lib/cats');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-// Each one gets the daily kitty at DAILY_HOUR in their own time zone: the one their phone last reported,
-// else these defaults (his, hers).
+// Each one gets the daily kitty at DAILY_HOUR in their own time zone (his, hers). Fixed on purpose:
+// a laptop or a trip abroad shouldn't move it.
 const TIME_ZONE = process.env.TIME_ZONE || 'Europe/London';
 const HER_TIME_ZONE = process.env.HER_TIME_ZONE || 'Europe/Moscow';
 const DAILY_HOUR = Number(process.env.DAILY_HOUR || 9);
@@ -92,9 +92,7 @@ function localDay(now = Date.now(), tz = TIME_ZONE) {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
-function zoneOf(role) {
-  return store.db.tz[role] || (role === 'her' ? HER_TIME_ZONE : TIME_ZONE);
-}
+const zoneOf = (role) => (role === 'her' ? HER_TIME_ZONE : TIME_ZONE);
 
 /** Epoch ms of the next DAILY_HOUR:10 in tz (the widget app refreshes then). */
 function nextDailyAt(tz, now = Date.now()) {

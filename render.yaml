@@ -13,7 +13,7 @@ services:
         sync: false
       - key: TIME_ZONE
         value: Europe/London
-      - key: HER_TIME_ZONE # her default until her phone reports its own
+      - key: HER_TIME_ZONE
         value: Europe/Moscow
       - key: DAILY_HOUR # hour the daily kitty arrives, in each one's own time zone
         value: "9"
