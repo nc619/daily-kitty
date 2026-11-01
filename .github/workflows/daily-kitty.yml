@@ -1,9 +1,10 @@
-# Render's free plan sleeps when nobody uses it, so this wakes the server every morning
-# to deliver the daily kitty. The server only sends one per day, so extra runs are harmless.
+# Backup wake-up: the server keeps itself awake, but if it ever sleeps this wakes it for each morning.
+# GitHub often runs these hours late. The server only sends one per person per day, so extra runs are harmless.
 name: Daily kitty
 
 on:
   schedule:
+    - cron: "5 6 * * *" # 09:05 Moscow
     - cron: "5 8 * * *" # 09:05 London in summer
     - cron: "5 9 * * *" # 09:05 London in winter
     - cron: "30 10 * * *" # backup

@@ -9,8 +9,12 @@ const cats = require('./lib/cats');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+// Each one gets the daily kitty at DAILY_HOUR in their own time zone: the one their phone last reported,
+// else these defaults (his, hers).
 const TIME_ZONE = process.env.TIME_ZONE || 'Europe/London';
+const HER_TIME_ZONE = process.env.HER_TIME_ZONE || 'Europe/Moscow';
 const DAILY_HOUR = Number(process.env.DAILY_HOUR || 9);
+const ROLES = ['him', 'her'];
 const MEDIA_LIMIT = media.limit; // 9.5 GB on R2 (free up to 10 GB), 900 MB in the database
 // If a kitty was sent by hand this recently, the daily one is skipped so it stays up.
 const KEEP_HAND_SENT_HOURS = 6;
@@ -88,9 +92,13 @@ function localDay(now = Date.now(), tz = TIME_ZONE) {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
-/** Epoch ms of the next DAILY_HOUR:10 in TIME_ZONE (the widget app refreshes then). */
-function nextDailyAt(now = Date.now()) {
-  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+function zoneOf(role) {
+  return store.db.tz[role] || (role === 'her' ? HER_TIME_ZONE : TIME_ZONE);
+}
+
+/** Epoch ms of the next DAILY_HOUR:10 in tz (the widget app refreshes then). */
+function nextDailyAt(tz, now = Date.now()) {
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   let t = Math.ceil(now / 300000) * 300000;
   for (let i = 0; i < 400; i++, t += 300000) {
     const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
@@ -185,16 +193,27 @@ function setCurrent(post, extra = {}) {
     sentAt: post.at,
     ...extra,
   };
+  store.db.waiting = {};
   persist();
 }
 
-async function publishDaily() {
+/** What this one sees as today's kitty: the other's daily kitty stays hidden until their own morning. */
+const currentFor = (me) => store.db.waiting[me] || store.db.current;
+
+const dailyPush = (roles) =>
+  push.send({ type: 'kitty', title: pick(DAILY_TITLES), body: pick(DAILY_BODIES), image: store.db.current.imageUrl, tag: 'kitty' }, roles);
+
+/** A new daily kitty for the roles whose morning it is; the others keep seeing their kitty until theirs. */
+async function publishDaily(roles) {
   const kitty = await cats.random();
   cats.markUsed(kitty.url);
+  const seen = Object.fromEntries(ROLES.map((r) => [r, currentFor(r)]));
   const post = addPost({ kind: 'kitty', from: 'daily', url: kitty.url, mime: 'image/jpeg', credit: kitty.credit });
   setCurrent(post);
-  await push.send({ type: 'kitty', title: pick(DAILY_TITLES), body: pick(DAILY_BODIES), image: kitty.url, tag: 'kitty' });
-  console.log('Daily kitty published');
+  for (const r of ROLES) if (!roles.includes(r) && seen[r]) store.db.waiting[r] = seen[r];
+  persist();
+  await dailyPush(roles);
+  console.log(`Daily kitty published for ${roles.join(' & ')}`);
 }
 
 // ---------- Daily jobs: kitty + calendar digest ----------
@@ -207,31 +226,29 @@ function maybeDaily() {
 
 async function runDaily() {
   cats.refreshExternal().catch((e) => console.warn('Kitty pool refresh failed:', e.message));
-  const { date, hour } = localDay();
-  if (hour < DAILY_HOUR) return 'too-early';
-  let status = 'already-sent';
-  if (store.db.lastDaily !== date) {
-    store.db.lastDaily = date;
-    const cur = store.db.current;
-    if (cur && cur.from !== 'daily' && Date.now() - cur.sentAt < KEEP_HAND_SENT_HOURS * 3600_000) {
-      persist();
-      status = 'kept-hand-sent';
-    } else {
-      try {
-        await publishDaily();
-        status = 'sent';
-      } catch (e) {
-        store.db.lastDaily = null; // try again next time
-        throw e;
-      }
-    }
-  }
-  if (store.db.lastDigest !== date) {
-    store.db.lastDigest = date;
+  const db = store.db;
+  const due = ROLES.map((role) => ({ role, ...localDay(Date.now(), zoneOf(role)) }))
+    .filter((d) => d.hour >= DAILY_HOUR && db.dailyFor[d.role] !== d.date);
+  if (!due.length) return 'nothing-due';
+  const roles = due.map((d) => d.role);
+  const cur = db.current;
+  let status;
+  if (cur && cur.from !== 'daily' && Date.now() - cur.sentAt < KEEP_HAND_SENT_HOURS * 3600_000) {
+    status = 'kept-hand-sent';
+  } else if (roles.every((r) => db.waiting[r])) {
+    // The other one's kitty from earlier today becomes theirs too.
+    for (const r of roles) delete db.waiting[r];
     persist();
-    await calendarDigest(date);
+    await dailyPush(roles);
+    status = 'shared';
+  } else {
+    await publishDaily(roles); // on failure nothing is marked, so it tries again next time
+    status = 'sent';
   }
-  return status;
+  for (const d of due) db.dailyFor[d.role] = d.date;
+  persist();
+  for (const d of due) await calendarDigest(d.date, d.role);
+  return `${status}:${roles.join(',')}`;
 }
 
 /** Occurrence of an event on a given day (yearly events repeat), or null. */
@@ -241,7 +258,7 @@ function happensOn(ev, date) {
   return date >= ev.start && date <= end;
 }
 
-async function calendarDigest(date) {
+async function calendarDigest(date, role) {
   const today = store.db.events.filter((ev) => happensOn(ev, date) && isConfirmed(ev));
   if (!today.length) return;
   const lines = today.map((ev) => {
@@ -254,7 +271,7 @@ async function calendarDigest(date) {
     return `${EVENT_TYPES[ev.type] || '📌'} ${ev.title}${ev.time ? ` at ${ev.time}` : ''}`;
   }).filter(Boolean);
   if (!lines.length) return;
-  await push.send({ type: 'event', title: '📅 Today', body: lines.join('\n'), tag: 'digest', url: '/#calendar' });
+  await push.send({ type: 'event', title: '📅 Today', body: lines.join('\n'), tag: 'digest', url: '/#calendar' }, [role]);
 }
 
 // ---------- State ----------
@@ -275,7 +292,7 @@ function state(req) {
     me,
     unlocked: me === 'him' || db.unlocked,
     herUnlocked: db.unlocked,
-    current: db.current,
+    current: currentFor(me),
     note: fromOther(db.notes) || null,
     doodle: publicPost(db.posts.find((p) => p.kind === 'doodle' && p.from === push.other(me))) || null,
     latest: publicPost(db.posts.find((p) => p.from === push.other(me) && (p.kind === 'video' || p.kind === 'photo'))) || null,
@@ -688,6 +705,7 @@ route('POST', '/api/reset-her', async (req) => {
   }
   db.subs = db.subs.filter((s) => s.role !== 'her');
   delete db.tz.her;
+  delete db.waiting.her;
   db.unlocked = false;
   db.herKey = crypto.randomBytes(12).toString('hex');
   persist();
@@ -756,8 +774,9 @@ route('POST', '/api/heart', async (req) => heart(requireAny(req), await readJson
 route('POST', '/api/doodle', async (req) => doodle(requireUnlocked(req), await readJson(req)));
 
 route('GET', '/api/posts', async (req) => {
-  requireUnlocked(req);
-  return { posts: store.db.posts.slice(0, 500).map(publicPost) };
+  const me = requireUnlocked(req);
+  const hidden = store.db.waiting[me] && store.db.current.postId; // not their morning yet
+  return { posts: store.db.posts.filter((p) => p.id !== hidden).slice(0, 500).map(publicPost) };
 });
 route('DELETE', '/api/posts/([a-f0-9]+)', async (req, [id]) => deletePost(requireUnlocked(req), id));
 
@@ -786,13 +805,13 @@ route('GET', '/api/widget', async (req) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const base = `${req.headers['x-forwarded-proto'] || 'http'}://${host}`;
   const abs = (u) => (u && u.startsWith('/') ? base + u : u);
-  const cur = store.db.current;
+  const cur = currentFor(me);
   const doodle = store.db.posts.find((p) => p.kind === 'doodle' && p.from === push.other(me));
   const showDoodle = me === 'him' || store.db.unlocked;
   return {
     kitty: cur ? { url: abs(cur.imageUrl), caption: cur.caption || '', at: cur.sentAt } : null,
     doodle: showDoodle && doodle ? { url: abs(doodle.url), caption: doodle.caption || '', at: doodle.at } : null,
-    nextDaily: nextDailyAt(),
+    nextDaily: nextDailyAt(zoneOf(me)),
   };
 });
 
@@ -892,6 +911,10 @@ load()
     });
     server.listen(PORT, () => console.log(`Daily Kitty on http://localhost:${PORT} (storage: ${store.label})`));
     setInterval(() => maybeDaily().catch((e) => console.error('Daily kitty failed:', e)), 5 * 60_000);
+    // Render's free plan sleeps after 15 minutes without visitors, and a sleeping server can't deliver at 9.
+    // Visiting itself keeps it up (a whole month awake still fits the 750 free hours, for one free service).
+    const selfUrl = process.env.KEEP_AWAKE !== 'off' && process.env.RENDER_EXTERNAL_URL;
+    if (selfUrl) setInterval(() => fetch(`${selfUrl}/api/health`).catch(() => {}), 10 * 60_000);
     maybeDaily().catch((e) => console.error('Daily kitty failed:', e));
   })
   .catch((e) => {
